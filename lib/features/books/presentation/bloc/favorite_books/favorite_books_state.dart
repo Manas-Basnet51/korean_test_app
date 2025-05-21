@@ -1,41 +1,55 @@
 part of 'favorite_books_cubit.dart';
 
-abstract class FavoriteBooksState extends Equatable{}
-
-class FavoriteBooksInitial extends FavoriteBooksState {
-  @override
-  List<Object?> get props => [];
-}
-
-class FavoriteBooksLoading extends FavoriteBooksState {
-  @override
-  List<Object?> get props => [];
-}
-
-class FavoriteBooksLoaded extends FavoriteBooksState {
+class FavoriteBooksState extends BaseState {
   final List<BookItem> books;
   final bool hasMore;
-  
-  FavoriteBooksLoaded(this.books, this.hasMore);
-  
-  @override
-  List<Object?> get props => [books,hasMore];
-}
+  final bool isLoadingMore;
 
-class FavoriteBooksLoadingMore extends FavoriteBooksState {
-  final List<BookItem> currentBooks;
-  
-  FavoriteBooksLoadingMore(this.currentBooks);
-  
-  @override
-  List<Object?> get props => [currentBooks];
-}
+  const FavoriteBooksState({
+    super.isLoading = false,
+    super.error,
+    super.errorType,
+    this.books = const [],
+    this.hasMore = false,
+    this.isLoadingMore = false,
+  });
 
-class FavoriteBooksError extends FavoriteBooksState {
-  final String message;
-  
-  FavoriteBooksError(this.message);
-  
   @override
-  List<Object?> get props => [message];
+  List<Object?> get props => [
+    ...super.props,
+    books,
+    hasMore,
+    isLoadingMore,
+  ];
+
+  @override
+  FavoriteBooksState copyWithBaseState({
+    bool? isLoading,
+    String? error,
+    FailureType? errorType,
+  }) {
+    return copyWith(
+      isLoading: isLoading,
+      error: error,
+      errorType: errorType,
+    );
+  }
+
+  FavoriteBooksState copyWith({
+    bool? isLoading,
+    String? error,
+    FailureType? errorType,
+    List<BookItem>? books,
+    bool? hasMore,
+    bool? isLoadingMore,
+  }) {
+    return FavoriteBooksState(
+      isLoading: isLoading ?? this.isLoading,
+      error: error,
+      errorType: errorType,
+      books: books ?? this.books,
+      hasMore: hasMore ?? this.hasMore,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
+    );
+  }
 }

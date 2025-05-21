@@ -77,11 +77,11 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
         onRefresh: _refreshData,
         child: BlocBuilder<FavoriteBooksCubit, FavoriteBooksState>(
           builder: (context, state) {
-            if (state is FavoriteBooksInitial || state is FavoriteBooksLoading) {
+            if (state.isLoading) {
               return _buildLoadingState();
-            } else if (state is FavoriteBooksError) {
-              return _buildErrorView(state.message);
-            } else if (state is FavoriteBooksLoaded) {
+            } else if (state.error != null) {
+              return _buildErrorView(state.error!);
+            } else {
               final favoriteBooks = state.books;
               
               if (favoriteBooks.isEmpty) {
@@ -107,8 +107,6 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
                 },
               );
             }
-            
-            return _buildEmptyFavoritesView();
           },
         ),
       ),
@@ -271,24 +269,16 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
   }
   
   void _listenForPdfLoadingResult(BookItem book) {
-    _koreanBooksCubit.stream.listen((state) {
-      if (state is KoreanBookPdfLoaded && state.bookId == book.id) {
-        // Close loading dialog
-        // ignore: use_build_context_synchronously //TODO:what
-        Navigator.of(context, rootNavigator: true).pop();
-        // Open PDF
-        _verifyAndOpenPdf(state.pdfFile, book.title);
-      } else if (state is KoreanBookPdfError && state.bookId == book.id) {
-        // Close loading dialog
-        // ignore: use_build_context_synchronously //TODO: what
-        Navigator.of(context, rootNavigator: true).pop();
-        // Show error
-        _showRetrySnackBar(
-          _getReadableErrorMessage(state.message), 
-          () => _viewPdf(book)
-        );
-      }
-    });
+    if (_koreanBooksCubit.state.loadedPdfFile != null) {
+      Navigator.of(context, rootNavigator: true).pop();
+      _verifyAndOpenPdf(_koreanBooksCubit.state.loadedPdfFile!, book.title);
+    } else if (_koreanBooksCubit.state.hasError) {
+      Navigator.of(context, rootNavigator: true).pop();
+      _showRetrySnackBar(
+        _getReadableErrorMessage(_koreanBooksCubit.state.error!),
+        () => _viewPdf(book),
+      );
+    }
   }
   
   void _showRetrySnackBar(String message, VoidCallback onRetry) {

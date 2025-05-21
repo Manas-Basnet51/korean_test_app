@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:korean_language_app/core/errors/api_result.dart';
 import 'package:korean_language_app/core/routes/app_router.dart';
 import 'package:korean_language_app/core/enums/course_category.dart';
 import 'package:korean_language_app/features/books/presentation/bloc/favorite_books/favorite_books_cubit.dart';
@@ -27,15 +28,12 @@ class BooksPage extends StatefulWidget {
 class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _scrollController = ScrollController();
-  bool _isRefreshing = false;
   final Map<String, bool> _editPermissionCache = {};
   
   KoreanBooksCubit get _koreanBooksCubit => context.read<KoreanBooksCubit>();
   FavoriteBooksCubit get _favoriteBooksCubit => context.read<FavoriteBooksCubit>();
   LanguagePreferenceCubit get _languageCubit => context.read<LanguagePreferenceCubit>();
   FileUploadCubit get _fileUploadCubit => context.read<FileUploadCubit>();
-
-  StreamSubscription<KoreanBooksState>? _pdfLoadingSubscription;
   
   @override
   void initState() {
@@ -53,15 +51,13 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
   void dispose() {
     _tabController.dispose();
     _scrollController.dispose();
-    _pdfLoadingSubscription?.cancel();
     super.dispose();
   }
   
   void _onScroll() {
-    if (_isNearBottom && !_isRefreshing) {
+    if (_isNearBottom) {
       final state = _koreanBooksCubit.state;
-      
-      if (state is KoreanBooksLoaded && state.hasMore) {
+      if (state.hasMore && !state.isLoadingMore) {
         _koreanBooksCubit.loadMoreBooks();
       }
     }
@@ -69,7 +65,6 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
   
   bool get _isNearBottom {
     if (!_scrollController.hasClients) return false;
-    
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentScroll = _scrollController.offset;
     return currentScroll >= (maxScroll * 0.9);
@@ -80,19 +75,12 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
   }
   
   Future<void> _refreshData() async {
-    setState(() => _isRefreshing = true);
-    
-    try {
-      await _koreanBooksCubit.hardRefresh();
-      await _favoriteBooksCubit.hardRefresh();
-      _editPermissionCache.clear(); // Clear permission cache on refresh
-    } finally {
-      setState(() => _isRefreshing = false);
-    }
+    await _koreanBooksCubit.hardRefresh();
+    await _favoriteBooksCubit.hardRefresh();
+    _editPermissionCache.clear();
   }
 
   Future<bool> _checkEditPermission(String bookId) async {
-    // Check cache first
     if (_editPermissionCache.containsKey(bookId)) {
       return _editPermissionCache[bookId]!;
     }
@@ -148,9 +136,7 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
         ),
         IconButton(
           icon: const Icon(Icons.favorite),
-          onPressed: () {
-            context.push(Routes.favoriteBooks); 
-          },
+          onPressed: () => context.push(Routes.favoriteBooks),
           tooltip: _languageCubit.getLocalizedText(
             korean: '즐겨찾기',
             english: 'Favorites',
@@ -166,7 +152,7 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
         color: theme.colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues( alpha: 0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             offset: const Offset(0, 2),
             blurRadius: 6,
           ),
@@ -176,7 +162,7 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
         controller: _tabController,
         isScrollable: true,
         labelColor: theme.colorScheme.primary,
-        unselectedLabelColor: theme.colorScheme.onSurface.withValues( alpha: 0.7),
+        unselectedLabelColor: theme.colorScheme.onSurface.withValues(alpha: 0.7),
         labelStyle: theme.textTheme.titleSmall?.copyWith(
           fontWeight: FontWeight.bold,
         ),
@@ -238,21 +224,14 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
       ),
     );
   }
-  
+
   Widget _buildTabBarView() {
     return TabBarView(
       controller: _tabController,
       children: [
-        // Korean Books
         _buildBooksGridView(CourseCategory.korean),
-        
-        // Nepali Books
         _buildBooksGridView(CourseCategory.nepali),
-        
-        // Test Books
         _buildBooksGridView(CourseCategory.test),
-        
-        // Global Books
         _buildBooksGridView(CourseCategory.global),
       ],
     );
@@ -263,7 +242,6 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
       return _buildKoreanBooksGrid();
     }
     
-    // Placeholder for other categories - to be implemented
     return Center(
       child: Text(
         _languageCubit.getLocalizedText(
@@ -277,46 +255,27 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
   Widget _buildKoreanBooksGrid() {
     return BlocBuilder<KoreanBooksCubit, KoreanBooksState>(
       builder: (context, state) {
-        if (state is KoreanBooksInitial) {
-          return const Center(child: CircularProgressIndicator());
-        } else if (state is KoreanBooksError) {
-          return _buildErrorView(state.message);
-        }
-        
-        List<BookItem> books = [];
-        bool isLoading = false;
-        
-        if (state is KoreanBooksLoaded) {
-          books = state.books;
-        } else if (state is KoreanBooksLoadingMore) {
-          books = state.currentBooks;
-          isLoading = true;
-        } else if (state is KoreanBookPdfLoading) {
-          books = state.books;
-        } else if (state is KoreanBookPdfLoaded) {
-          books = state.books;
-        } else if (state is KoreanBookPdfError) {
-          books = state.books;
-        } else if (state is KoreanBooksLoading) {
+        if (state.isLoading && state.books.isEmpty) {
           return const BookGridSkeleton();
         }
-        
-        // Check FileUploadCubit state to show appropriate loading states
-        final fileUploadState = context.watch<FileUploadCubit>().state;
-        if (fileUploadState is FileUploading) {
-          isLoading = true;
+
+        if (state.hasError && state.books.isEmpty) {
+          return _buildErrorView(context, state.error!, state.errorType!);
         }
         
-        if (books.isEmpty) {
+        if (state.books.isEmpty) {
           return _buildEmptyBooksView(CourseCategory.korean);
         }
+
+        final isLoading = state.isLoadingMore || 
+                         context.watch<FileUploadCubit>().state is FileUploading;
         
         return RefreshIndicator(
           onRefresh: _refreshData,
           child: Stack(
             children: [
               BooksGrid(
-                books: books,
+                books: state.books,
                 scrollController: _scrollController,
                 checkEditPermission: _checkEditPermission,
                 onViewClicked: _viewPdf,
@@ -343,36 +302,31 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
     );
   }
   
-  Widget _buildErrorView(String message) {
+  Widget _buildErrorView(BuildContext context, String message, FailureType type) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
-            Icons.error_outline,
+          Icon(
+            _getErrorIcon(type),
             size: 48,
-            color: Colors.red,
+            color: _getErrorColor(context, type),
           ),
           const SizedBox(height: 16),
           Text(
-            _languageCubit.getLocalizedText(
-              korean: '오류가 발생했습니다',
-              english: 'An error occurred',
-            ),
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
+            _getErrorTitle(type),
+            style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: 8),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.grey[600],
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              message,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 24),
           ElevatedButton.icon(
             onPressed: _refreshData,
             icon: const Icon(Icons.refresh),
@@ -387,12 +341,78 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
       ),
     );
   }
-  
+
+  IconData _getErrorIcon(FailureType type) {
+    switch (type) {
+      case FailureType.network:
+        return Icons.wifi_off;
+      case FailureType.server:
+        return Icons.cloud_off;
+      case FailureType.auth:
+        return Icons.lock;
+      case FailureType.permission:
+        return Icons.no_accounts;
+      default:
+        return Icons.error_outline;
+    }
+  }
+
+  Color _getErrorColor(BuildContext context, FailureType type) {
+    final colorScheme = Theme.of(context).colorScheme;
+    switch (type) {
+      case FailureType.network:
+        return Colors.orange;
+      case FailureType.server:
+        return Colors.red;
+      case FailureType.auth:
+        return colorScheme.primary;
+      case FailureType.permission:
+        return Colors.purple;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  String _getErrorTitle(FailureType type) {
+    return _languageCubit.getLocalizedText(
+      korean: _getErrorTitleKorean(type),
+      english: _getErrorTitleEnglish(type),
+    );
+  }
+
+  String _getErrorTitleKorean(FailureType type) {
+    switch (type) {
+      case FailureType.network:
+        return '인터넷 연결 없음';
+      case FailureType.server:
+        return '서버 오류';
+      case FailureType.auth:
+        return '인증 필요';
+      case FailureType.permission:
+        return '권한 없음';
+      default:
+        return '오류가 발생했습니다';
+    }
+  }
+
+  String _getErrorTitleEnglish(FailureType type) {
+    switch (type) {
+      case FailureType.network:
+        return 'No Internet Connection';
+      case FailureType.server:
+        return 'Server Error';
+      case FailureType.auth:
+        return 'Authentication Required';
+      case FailureType.permission:
+        return 'Permission Denied';
+      default:
+        return 'Something Went Wrong';
+    }
+  }
+
   Widget _buildEmptyBooksView(CourseCategory category) {
     return RefreshIndicator(
-      onRefresh: () async {
-        await _refreshData();
-      },
+      onRefresh: _refreshData,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         child: Center(
@@ -450,16 +470,27 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
       ),
     );
   }
+
   void _showDownloadOptions(BookItem book) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Download Book'),
+        title: Text(
+          _languageCubit.getLocalizedText(
+            korean: '책 다운로드',
+            english: 'Download Book',
+          ),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Choose download format:'),
+            Text(
+              _languageCubit.getLocalizedText(
+                korean: '다운로드 형식 선택:',
+                english: 'Choose download format:',
+              ),
+            ),
             const SizedBox(height: 16),
             ListTile(
               leading: const Icon(Icons.picture_as_pdf),
@@ -468,20 +499,35 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
               onTap: () {
                 Navigator.pop(context);
                 // Implement PDF download
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Downloading ${book.title} as PDF...')),
+                _showSnackBar(
+                  _languageCubit.getLocalizedText(
+                    korean: '${book.title} PDF 다운로드 중...',
+                    english: 'Downloading ${book.title} as PDF...',
+                  ),
                 );
               },
             ),
             ListTile(
               leading: const Icon(Icons.save_alt),
-              title: const Text('Save for offline'),
-              subtitle: const Text('Download for offline viewing'),
+              title: Text(
+                _languageCubit.getLocalizedText(
+                  korean: '오프라인 저장',
+                  english: 'Save for offline',
+                ),
+              ),
+              subtitle: Text(
+                _languageCubit.getLocalizedText(
+                  korean: '오프라인에서도 볼 수 있도록 저장',
+                  english: 'Download for offline viewing',
+                ),
+              ),
               onTap: () {
                 Navigator.pop(context);
-                // Implement offline saving logic
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Saving ${book.title} for offline use...')),
+                _showSnackBar(
+                  _languageCubit.getLocalizedText(
+                    korean: '${book.title} 오프라인 저장 중...',
+                    english: 'Saving ${book.title} for offline use...',
+                  ),
                 );
               },
             ),
@@ -490,36 +536,37 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('CANCEL'),
+            child: Text(
+              _languageCubit.getLocalizedText(
+                korean: '취소',
+                english: 'CANCEL',
+              ),
+            ),
           ),
         ],
       ),
     );
   }
   
-  // PDF viewing functionality
   void _viewPdf(BookItem book) {
+    if (_koreanBooksCubit.state.pdfLoadingBookId == book.id) return;
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => _buildPdfLoadingDialog(book.title),
     );
     
-    context.read<KoreanBooksCubit>().loadBookPdf(book.id);
+    _koreanBooksCubit.loadBookPdf(book.id);
     
     _listenForPdfLoadingResult(book);
   }
   
-  // Placeholder for test book functionality - to be implemented
   void _testBook(BookItem book) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          _languageCubit.getLocalizedText(
-            korean: '테스트 기능이 곧 제공될 예정입니다',
-            english: 'Test functionality coming soon',
-          ),
-        ),
+    _showSnackBar(
+      _languageCubit.getLocalizedText(
+        korean: '테스트 기능이 곧 제공될 예정입니다',
+        english: 'Test functionality coming soon',
       ),
     );
   }
@@ -538,21 +585,15 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
   void _editBook(BookItem book) async {
     final hasPermission = await _koreanBooksCubit.canUserEditBook(book.id);
     if (!hasPermission) {
-      // ignore: use_build_context_synchronously //TODO: have a dedicated snackbar system
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _languageCubit.getLocalizedText(
-              korean: '이 책을 편집할 권한이 없습니다',
-              english: 'You do not have permission to edit this book',
-            ),
-          ),
+      _showSnackBar(
+        _languageCubit.getLocalizedText(
+          korean: '이 책을 편집할 권한이 없습니다',
+          english: 'You do not have permission to edit this book',
         ),
       );
       return;
     }
 
-    // ignore: use_build_context_synchronously //TODO: what?
     final result = await context.push(
       Routes.editBooks,
       extra: BookEditPage(book: book),
@@ -566,22 +607,39 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
   void _deleteBook(BookItem book) async {
     final hasPermission = await _koreanBooksCubit.canUserDeleteBook(book.id);
     if (!hasPermission) {
-      // ignore: use_build_context_synchronously //TODO: have a dedicated snackbar system
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _languageCubit.getLocalizedText(
-              korean: '이 책을 삭제할 권한이 없습니다',
-              english: 'You do not have permission to delete this book',
-            ),
-          ),
+      _showSnackBar(
+        _languageCubit.getLocalizedText(
+          korean: '이 책을 삭제할 권한이 없습니다',
+          english: 'You do not have permission to delete this book',
         ),
       );
       return;
     }
 
-    final confirmed = await showDialog<bool>(
-      // ignore: use_build_context_synchronously //TODO: what??
+    final confirmed = await _showDeleteConfirmationDialog(book);
+    if (confirmed) {
+      final success = await _fileUploadCubit.deleteBook(book.id);
+      if (success) {
+        _koreanBooksCubit.removeBookFromState(book.id);
+        _showSnackBar(
+          _languageCubit.getLocalizedText(
+            korean: '책이 성공적으로 삭제되었습니다',
+            english: 'Book deleted successfully',
+          ),
+        );
+      } else {
+        _showSnackBar(
+          _languageCubit.getLocalizedText(
+            korean: '책 삭제에 실패했습니다',
+            english: 'Failed to delete book',
+          ),
+        );
+      }
+    }
+  }
+
+  Future<bool> _showDeleteConfirmationDialog(BookItem book) async {
+    return await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(
@@ -629,36 +687,6 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
         ],
       ),
     ) ?? false;
-
-    if (confirmed) {
-      final success = await _fileUploadCubit.deleteBook(book.id);
-      if (success) {
-        _koreanBooksCubit.removeBookFromState(book.id);
-        // ignore: use_build_context_synchronously //TODO: have a dedicated snackbar system
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              _languageCubit.getLocalizedText(
-                korean: '책이 성공적으로 삭제되었습니다',
-                english: 'Book deleted successfully',
-              ),
-            ),
-          ),
-        );
-      } else { 
-        // ignore: use_build_context_synchronously //TODO: have a dedicated snackbar system
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              _languageCubit.getLocalizedText(
-                korean: '책 삭제에 실패했습니다',
-                english: 'Failed to delete book',
-              ),
-            ),
-          ),
-        );
-      }
-    }
   }
   
   Widget _buildPdfLoadingDialog(String title) {
@@ -688,30 +716,22 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
   }
   
   void _listenForPdfLoadingResult(BookItem book) {
-    _pdfLoadingSubscription?.cancel();
-    
-    _pdfLoadingSubscription = _koreanBooksCubit.stream.listen((state) {
-      if (state is KoreanBookPdfLoaded && state.bookId == book.id) {
-
-        // ignore: use_build_context_synchronously // TODO: what??
-        Navigator.of(context, rootNavigator: true).pop();
-        _verifyAndOpenPdf(state.pdfFile, book.title);
-        _pdfLoadingSubscription?.cancel();
-        _pdfLoadingSubscription = null;
-
-      } else if (state is KoreanBookPdfError && state.bookId == book.id) {
-        // ignore: use_build_context_synchronously //TODO: whatt??
-        Navigator.of(context, rootNavigator: true).pop();
-        _showRetrySnackBar(
-          _getReadableErrorMessage(state.message), 
-          () => _viewPdf(book),
-        );
-
-        _pdfLoadingSubscription?.cancel();
-        _pdfLoadingSubscription = null;
-
-      }
-    });
+    if (_koreanBooksCubit.state.loadedPdfFile != null) {
+      Navigator.of(context, rootNavigator: true).pop();
+      _verifyAndOpenPdf(_koreanBooksCubit.state.loadedPdfFile!, book.title);
+    } else if (_koreanBooksCubit.state.hasError) {
+      Navigator.of(context, rootNavigator: true).pop();
+      _showSnackBar(
+        _getReadableErrorMessage(_koreanBooksCubit.state.error!),
+        action: SnackBarAction(
+          label: _languageCubit.getLocalizedText(
+            korean: '다시 시도',
+            english: 'Retry',
+          ),
+          onPressed: () => _viewPdf(book),
+        ),
+      );
+    }
   }
   
   String _getReadableErrorMessage(String technicalError) {
@@ -738,17 +758,11 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
     }
   }
   
-  void _showRetrySnackBar(String message, VoidCallback onRetry) {
+  void _showSnackBar(String message, {SnackBarAction? action}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        action: SnackBarAction(
-          label: _languageCubit.getLocalizedText(
-            korean: '다시 시도',
-            english: 'Retry',
-          ),
-          onPressed: onRetry,
-        ),
+        action: action,
       ),
     );
   }
@@ -764,15 +778,10 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
       
       Future.microtask(() => _openPdfViewer(pdfFile, title));
     } catch (e) {
-      // ignore: use_build_context_synchronously //TODO: have a dedicated snackbar system
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _languageCubit.getLocalizedText(
-              korean: '오류: PDF 파일을 열 수 없습니다',
-              english: 'Error: PDF file cannot be opened',
-            ),
-          ),
+      _showSnackBar(
+        _languageCubit.getLocalizedText(
+          korean: '오류: PDF 파일을 열 수 없습니다',
+          english: 'Error: PDF file cannot be opened',
         ),
       );
     }
@@ -785,6 +794,3 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
     );
   }
 }
-
-
-
