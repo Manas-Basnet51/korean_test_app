@@ -11,7 +11,7 @@ void registerProfileDependencies(GetIt sl) {
   
   // Repository
   sl.registerLazySingleton<ProfileRepository>(
-    () => ProfileRepositoryImpl(dataSource: sl()),
+    () => ProfileRepositoryImpl(dataSource: sl(),networkInfo: sl()),
   );
   
   // Data Source

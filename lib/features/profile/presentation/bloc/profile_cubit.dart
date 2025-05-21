@@ -1,8 +1,8 @@
 import 'dart:developer';
-
-import 'package:equatable/equatable.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:korean_language_app/core/data/base_state.dart';
+import 'package:korean_language_app/core/errors/api_result.dart';
 import 'package:korean_language_app/features/profile/domain/repositories/profile_repository.dart';
 import 'package:korean_language_app/features/profile/data/models/profile_model.dart';
 part 'profile_state.dart';
@@ -30,7 +30,11 @@ class ProfileCubit extends Cubit<ProfileState> {
 
   // Method to check if Firebase Storage is available
   Future<void> _checkStorageAvailability() async {
-    await profileRepository.checkAvailability().then((value) => _isStorageAvailable = value.$1);
+    final result = await profileRepository.checkAvailability();
+    result.fold(
+      onSuccess: (data) => _isStorageAvailable = data.$1,
+      onFailure: (_, __) => _isStorageAvailable = false,
+    );
   }
 
   // Getter to check if storage is available
@@ -40,37 +44,52 @@ class ProfileCubit extends Cubit<ProfileState> {
     try {
       // Only show loading state if we don't have cached data
       if (_cachedProfile == null) {
-        emit(ProfileLoading());
+        emit(ProfileState(isLoading: true));
       }
       
       final currentUser = auth.currentUser;
       if (currentUser == null) {
-        emit(ProfileError('User not authenticated'));
+        emit(ProfileState(error: 'User not authenticated', errorType: FailureType.auth));
         return;
       }
 
-      final profileData = await profileRepository.getProfile(currentUser.uid);
+      final result = await profileRepository.getProfile(currentUser.uid);
       
-      final loadedProfile = ProfileLoaded.fromModel(
-        profileData,
-        operation: ProfileOperation(status: ProfileOperationStatus.completed)
+      result.fold(
+        onSuccess: (profileData) {
+          final loadedProfile = ProfileLoaded.fromModel(
+            profileData,
+            operation: ProfileOperation(status: ProfileOperationStatus.completed)
+          );
+          
+          // Update cache
+          _cachedProfile = loadedProfile;
+          
+          emit(loadedProfile);
+        },
+        onFailure: (message, type) {
+          // If we have cached data, keep showing it but emit error notification via listener
+          if (_cachedProfile != null) {
+            emit(ProfileState(error: message, errorType: type));
+            Future.delayed(const Duration(milliseconds: 100), () {
+              emit(_cachedProfile!);
+            });
+          } else {
+            emit(ProfileState(error: message, errorType: type));
+          }
+        },
       );
-      
-      // Update cache
-      _cachedProfile = loadedProfile;
-      
-      emit(loadedProfile); 
     } catch (e) {
       log('Error loading profile: ${e.toString()}');
       
       // If we have cached data, keep showing it but emit error notification via listener
       if (_cachedProfile != null) {
-        emit(ProfileError(e.toString()));
+        emit(ProfileState(error: e.toString()));
         Future.delayed(const Duration(milliseconds: 100), () {
           emit(_cachedProfile!);
         });
       } else {
-        emit(ProfileError(e.toString()));
+        emit(ProfileState(error: e.toString()));
       }
     }
   }
@@ -103,24 +122,41 @@ class ProfileCubit extends Cubit<ProfileState> {
           mobileNumber: mobileNumber ?? currentState.mobileNumber,
         );
         
-        await profileRepository.updateProfile(updatedProfile);
+        final result = await profileRepository.updateProfile(updatedProfile);
         
-        final loadedProfile = ProfileLoaded.fromModel(
-          updatedProfile,
-          operation: ProfileOperation(
-            type: ProfileOperationType.updateProfile,
-            status: ProfileOperationStatus.completed,
-          ),
+        result.fold(
+          onSuccess: (_) {
+            final loadedProfile = ProfileLoaded.fromModel(
+              updatedProfile,
+              operation: ProfileOperation(
+                type: ProfileOperationType.updateProfile,
+                status: ProfileOperationStatus.completed,
+              ),
+            );
+            
+            // Update cache
+            _cachedProfile = loadedProfile;
+            
+            // Mark operation as completed and update profile data
+            emit(loadedProfile);
+            
+            // Clear operation status after a delay
+            _clearOperationAfterDelay();
+          },
+          onFailure: (message, type) {
+            // Mark operation as failed but keep showing the profile
+            emit(currentState.copyWithOperation(
+              ProfileOperation(
+                type: ProfileOperationType.updateProfile,
+                status: ProfileOperationStatus.failed,
+                message: message,
+              ),
+            ));
+            
+            // Clear operation status after a delay
+            _clearOperationAfterDelay();
+          },
         );
-        
-        // Update cache
-        _cachedProfile = loadedProfile;
-        
-        // Mark operation as completed and update profile data
-        emit(loadedProfile);
-        
-        // Clear operation status after a delay
-        _clearOperationAfterDelay();
       }
     } catch (e) {
       log('Error updating profile: ${e.toString()}');
@@ -138,7 +174,7 @@ class ProfileCubit extends Cubit<ProfileState> {
         // Clear operation status after a delay
         _clearOperationAfterDelay();
       } else {
-        emit(ProfileError(e.toString()));
+        emit(ProfileState(error: e.toString()));
       }
     }
   }
@@ -173,53 +209,69 @@ class ProfileCubit extends Cubit<ProfileState> {
           ),
         ));
         
-        try {
-          final imageUrl = await profileRepository.uploadProfileImage(filePath);
-          
-          final updatedProfile = ProfileModel(
-            id: currentState.id,
-            name: currentState.name,
-            email: currentState.email,
-            profileImageUrl: imageUrl,
-            topikLevel: currentState.topikLevel,
-            completedTests: currentState.completedTests,
-            averageScore: currentState.averageScore,
-            mobileNumber: currentState.mobileNumber,
-          );
-          
-          await profileRepository.updateProfile(updatedProfile);
-          
-          final loadedProfile = ProfileLoaded.fromModel(
-            updatedProfile,
-            operation: ProfileOperation(
-              type: ProfileOperationType.uploadImage,
-              status: ProfileOperationStatus.completed,
-            ),
-          );
-          
-          // Update cache
-          _cachedProfile = loadedProfile;
-          
-          // Mark upload as completed and update profile data
-          emit(loadedProfile);
-          
-          // Clear operation status after a delay
-          _clearOperationAfterDelay();
-        } catch (storageError) {
-          log('Storage error: ${storageError.toString()}');
-          
-          // Mark upload as failed but keep showing the profile
-          emit(currentState.copyWithOperation(
-            ProfileOperation(
-              type: ProfileOperationType.uploadImage,
-              status: ProfileOperationStatus.failed,
-              message: 'Unable to upload image: ${storageError.toString()}',
-            ),
-          ));
-          
-          // Clear operation status after a delay
-          _clearOperationAfterDelay();
-        }
+        final imageUrlResult = await profileRepository.uploadProfileImage(filePath);
+        
+        imageUrlResult.fold(
+          onSuccess: (imageUrl) async {
+            final updatedProfile = ProfileModel(
+              id: currentState.id,
+              name: currentState.name,
+              email: currentState.email,
+              profileImageUrl: imageUrl,
+              topikLevel: currentState.topikLevel,
+              completedTests: currentState.completedTests,
+              averageScore: currentState.averageScore,
+              mobileNumber: currentState.mobileNumber,
+            );
+            
+            final updateResult = await profileRepository.updateProfile(updatedProfile);
+            
+            updateResult.fold(
+              onSuccess: (_) {
+                final loadedProfile = ProfileLoaded.fromModel(
+                  updatedProfile,
+                  operation: ProfileOperation(
+                    type: ProfileOperationType.uploadImage,
+                    status: ProfileOperationStatus.completed,
+                  ),
+                );
+                
+                // Update cache
+                _cachedProfile = loadedProfile;
+                
+                // Mark upload as completed and update profile data
+                emit(loadedProfile);
+                
+                // Clear operation status after a delay
+                _clearOperationAfterDelay();
+              },
+              onFailure: (message, type) {
+                emit(currentState.copyWithOperation(
+                  ProfileOperation(
+                    type: ProfileOperationType.uploadImage,
+                    status: ProfileOperationStatus.failed,
+                    message: 'Error updating profile: $message',
+                  ),
+                ));
+                
+                _clearOperationAfterDelay();
+              },
+            );
+          },
+          onFailure: (message, type) {
+            // Mark upload as failed but keep showing the profile
+            emit(currentState.copyWithOperation(
+              ProfileOperation(
+                type: ProfileOperationType.uploadImage,
+                status: ProfileOperationStatus.failed,
+                message: 'Unable to upload image: $message',
+              ),
+            ));
+            
+            // Clear operation status after a delay
+            _clearOperationAfterDelay();
+          },
+        );
       }
     } catch (e) {
       log('Error in upload flow: ${e.toString()}');
@@ -237,7 +289,7 @@ class ProfileCubit extends Cubit<ProfileState> {
         // Clear operation status after a delay
         _clearOperationAfterDelay();
       } else {
-        emit(ProfileError(e.toString()));
+        emit(ProfileState(error: e.toString()));
       }
     }
   }
@@ -265,24 +317,41 @@ class ProfileCubit extends Cubit<ProfileState> {
           mobileNumber: currentState.mobileNumber,
         );
         
-        await profileRepository.updateProfile(updatedProfile);
+        final result = await profileRepository.updateProfile(updatedProfile);
         
-        final loadedProfile = ProfileLoaded.fromModel(
-          updatedProfile,
-          operation: ProfileOperation(
-            type: ProfileOperationType.removeImage,
-            status: ProfileOperationStatus.completed,
-          ),
+        result.fold(
+          onSuccess: (_) {
+            final loadedProfile = ProfileLoaded.fromModel(
+              updatedProfile,
+              operation: ProfileOperation(
+                type: ProfileOperationType.removeImage,
+                status: ProfileOperationStatus.completed,
+              ),
+            );
+            
+            // Update cache
+            _cachedProfile = loadedProfile;
+            
+            // Mark removal as completed and update profile data
+            emit(loadedProfile);
+            
+            // Clear operation status after a delay
+            _clearOperationAfterDelay();
+          },
+          onFailure: (message, type) {
+            // Mark removal as failed but keep showing the profile
+            emit(currentState.copyWithOperation(
+              ProfileOperation(
+                type: ProfileOperationType.removeImage,
+                status: ProfileOperationStatus.failed,
+                message: message,
+              ),
+            ));
+            
+            // Clear operation status after a delay
+            _clearOperationAfterDelay();
+          },
         );
-        
-        // Update cache
-        _cachedProfile = loadedProfile;
-        
-        // Mark removal as completed and update profile data
-        emit(loadedProfile);
-        
-        // Clear operation status after a delay
-        _clearOperationAfterDelay();
       }
     } catch (e) {
       log('Error removing profile image: ${e.toString()}');
@@ -300,7 +369,7 @@ class ProfileCubit extends Cubit<ProfileState> {
         // Clear operation status after a delay
         _clearOperationAfterDelay();
       } else {
-        emit(ProfileError(e.toString()));
+        emit(ProfileState(error: e.toString()));
       }
     }
   }

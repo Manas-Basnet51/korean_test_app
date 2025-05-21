@@ -1,16 +1,7 @@
 part of 'profile_cubit.dart';
 
-abstract class ProfileState extends Equatable {
-  @override
-  List<Object?> get props => [];
-}
-
-class ProfileInitial extends ProfileState {}
-
-class ProfileLoading extends ProfileState {}
-
 enum ProfileOperationType { uploadImage, removeImage, updateProfile }
-enum ProfileOperationStatus { none ,inProgress, completed, failed }
+enum ProfileOperationStatus { none, inProgress, completed, failed }
 
 class ProfileOperation {
   final ProfileOperationType? type;
@@ -41,6 +32,29 @@ class ProfileOperation {
   int get hashCode => type.hashCode ^ status.hashCode ^ (message?.hashCode ?? 0);
 }
 
+class ProfileState extends BaseState {
+  const ProfileState({
+    super.isLoading = false,
+    super.error,
+    super.errorType,
+  });
+  
+  @override
+  ProfileState copyWithBaseState({
+    bool? isLoading,
+    String? error,
+    FailureType? errorType,
+  }) {
+    return ProfileState(
+      isLoading: isLoading ?? this.isLoading,
+      error: error,
+      errorType: errorType,
+    );
+  }
+}
+
+class ProfileInitial extends ProfileState {}
+
 class ProfileLoaded extends ProfileState {
   final String id;
   final String name;
@@ -52,7 +66,10 @@ class ProfileLoaded extends ProfileState {
   final String? mobileNumber;
   final ProfileOperation currentOperation;
 
-  ProfileLoaded({
+  const ProfileLoaded({
+    super.isLoading = false,
+    super.error,
+    super.errorType,
     required this.id,
     required this.name,
     required this.email,
@@ -78,7 +95,6 @@ class ProfileLoaded extends ProfileState {
     );
   }
   
-  // New method to create a copy with a different operation state
   ProfileLoaded copyWithOperation(ProfileOperation operation) {
     return ProfileLoaded(
       id: id,
@@ -88,12 +104,39 @@ class ProfileLoaded extends ProfileState {
       topikLevel: topikLevel,
       completedTests: completedTests,
       averageScore: averageScore,
+      mobileNumber: mobileNumber,
       currentOperation: operation,
+      isLoading: isLoading,
+      error: error,
+      errorType: errorType,
+    );
+  }
+  
+  @override
+  ProfileLoaded copyWithBaseState({
+    bool? isLoading,
+    String? error,
+    FailureType? errorType,
+  }) {
+    return ProfileLoaded(
+      id: id,
+      name: name,
+      email: email,
+      profileImageUrl: profileImageUrl,
+      topikLevel: topikLevel,
+      completedTests: completedTests,
+      averageScore: averageScore,
+      mobileNumber: mobileNumber,
+      currentOperation: currentOperation,
+      isLoading: isLoading ?? this.isLoading,
+      error: error,
+      errorType: errorType,
     );
   }
 
   @override
   List<Object?> get props => [
+        ...super.props,
         id,
         name,
         email,
@@ -104,13 +147,4 @@ class ProfileLoaded extends ProfileState {
         currentOperation,
         mobileNumber
       ];
-}
-
-class ProfileError extends ProfileState {
-  final String message;
-
-  ProfileError(this.message);
-
-  @override
-  List<Object?> get props => [message];
 }

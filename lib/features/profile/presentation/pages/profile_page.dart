@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:korean_language_app/core/errors/api_result.dart';
+import 'package:korean_language_app/core/presentation/widgets/errors/error_widget.dart';
 import 'package:korean_language_app/core/routes/app_router.dart';
 import 'package:korean_language_app/features/admin/presentation/bloc/admin_permission_cubit.dart';
 import 'package:korean_language_app/features/auth/presentation/bloc/auth_cubit.dart';
@@ -113,22 +115,30 @@ class _ProfilePageState extends State<ProfilePage> {
           // Show network error banner if offline but allow content to still be visible
           return Column(
             children: [
-              // Connectivity status banner
+              // Connectivity status banner - using ErrorView in compact mode
               if (isOffline)
-                _buildOfflineBanner(context),
+                ErrorView(
+                  message: '',
+                  errorType: FailureType.network,
+                  onRetry: () {
+                    context.read<ConnectivityCubit>().checkConnectivity();
+                  },
+                  isCompact: true,
+                ),
                 
               // Profile content with error handling
               Expanded(
                 child: BlocConsumer<ProfileCubit, ProfileState>(
                   listener: (context, state) {
-                    if (state is ProfileError) {
+                    // Handle errors based on type
+                    if (state.hasError) {
                       snackBarCubit.showErrorLocalized(
-                        korean: '오류가 발생했습니다. 다시 시도해주세요.',
-                        english: 'An error occurred. Please try again.',
+                        korean: state.error ?? '오류가 발생했습니다.',
+                        english: state.error ?? 'An error occurred.',
                       );
                     }
                     
-                    // Handle operation status changes
+                    // Handle operation status changes for ProfileLoaded states
                     if (state is ProfileLoaded) {
                       final operation = state.currentOperation;
                       
@@ -164,13 +174,22 @@ class _ProfilePageState extends State<ProfilePage> {
                       return const Center(child: CircularProgressIndicator());
                     }
                     
-                    // If offline and no cached data, show offline message
-                    if (isOffline && state is ProfileLoading) {
-                      return _buildOfflineContent(context);
+                    // If offline and loading state (no cached data), show offline message
+                    if (isOffline && state.isLoading && context.read<ProfileCubit>().cachedProfile == null) {
+                      return ErrorView(
+                        message: '',
+                        errorType: FailureType.network,
+                        onRetry: () {
+                          context.read<ConnectivityCubit>().checkConnectivity();
+                          if (context.read<ConnectivityCubit>().state is ConnectivityConnected) {
+                            context.read<ProfileCubit>().loadProfile();
+                          }
+                        },
+                      );
                     }
                     
-                    // If loading (and online), show loading indicator
-                    if (state is ProfileLoading) {
+                    // If loading (and online) and no cached data, show loading indicator
+                    if (state.isLoading && context.read<ProfileCubit>().cachedProfile == null) {
                       return Center(
                         child: CircularProgressIndicator(color: colorScheme.primary),
                       );
@@ -185,10 +204,17 @@ class _ProfilePageState extends State<ProfilePage> {
                     } 
                     
                     // If error but cached data available, show cached data with error banner
-                    else if (state is ProfileError && context.read<ProfileCubit>().cachedProfile != null) {
+                    else if (state.hasError && context.read<ProfileCubit>().cachedProfile != null) {
                       return Column(
                         children: [
-                          _buildErrorBanner(context, state.message),
+                          ErrorView(
+                            message: state.error ?? '',
+                            errorType: state.errorType,
+                            onRetry: () {
+                              context.read<ProfileCubit>().loadProfile();
+                            },
+                            isCompact: true,
+                          ),
                           Expanded(
                             child: ProfileContent(
                               profileData: context.read<ProfileCubit>().cachedProfile!,
@@ -200,9 +226,15 @@ class _ProfilePageState extends State<ProfilePage> {
                     } 
                     
                     // If error and no cached data, show error message with retry button
-                    else if (state is ProfileError) {
-                      log(state.message);
-                      return _buildErrorContent(context, state.message);
+                    else if (state.hasError) {
+                      log('Error: ${state.error}, Type: ${state.errorType}');
+                      return ErrorView(
+                        message: state.error ?? '',
+                        errorType: state.errorType,
+                        onRetry: () {
+                          context.read<ProfileCubit>().loadProfile();
+                        },
+                      );
                     } 
                     
                     // Default case (not logged in)
@@ -224,216 +256,6 @@ class _ProfilePageState extends State<ProfilePage> {
             ],
           );
         },
-      ),
-    );
-  }
-
-  // Offline banner widget
-  Widget _buildOfflineBanner(BuildContext context) {
-    final theme = Theme.of(context);
-    final languageCubit = context.read<LanguagePreferenceCubit>();
-    
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-      color: Colors.amber.shade700,
-      child: Row(
-        children: [
-          const Icon(Icons.wifi_off, color: Colors.white, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              languageCubit.getLocalizedText(
-                korean: '오프라인 모드. 일부 기능이 제한됩니다.',
-                english: 'You\'re offline. Some features may be limited.',
-                hardWords: ['오프라인 모드'],
-              ),
-              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white),
-            ),
-          ),
-          TextButton(
-            onPressed: () {
-              context.read<ConnectivityCubit>().checkConnectivity();
-            },
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              visualDensity: VisualDensity.compact,
-            ),
-            child: Text(
-              languageCubit.getLocalizedText(
-                korean: '다시 시도',
-                english: 'Retry',
-                hardWords: [],
-              ),
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Error banner widget
-  Widget _buildErrorBanner(BuildContext context, String message) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final languageCubit = context.read<LanguagePreferenceCubit>();
-    
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-      color: colorScheme.error,
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline, color: Colors.white, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              languageCubit.getLocalizedText(
-                korean: '데이터 로드 중 오류가 발생했습니다. 캐시된 데이터를 표시합니다.',
-                english: 'Error loading data. Showing cached data.',
-                hardWords: ['캐시된 데이터'],
-              ),
-              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white),
-            ),
-          ),
-          TextButton(
-            onPressed: () {
-              context.read<ProfileCubit>().loadProfile();
-            },
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              visualDensity: VisualDensity.compact,
-            ),
-            child: Text(
-              languageCubit.getLocalizedText(
-                korean: '다시 시도',
-                english: 'Retry',
-                hardWords: [],
-              ),
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Error content widget
-  Widget _buildErrorContent(BuildContext context, String message) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final languageCubit = context.read<LanguagePreferenceCubit>();
-    
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.error_outline,
-            size: 48,
-            color: colorScheme.error,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            languageCubit.getLocalizedText(
-              korean: '오류',
-              english: 'Error',
-              hardWords: ['오류'],
-            ),
-            style: theme.textTheme.titleLarge?.copyWith(
-              color: colorScheme.error,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32.0),
-            child: Text(
-              message,
-              style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () {
-              // Retry loading the profile
-              context.read<ProfileCubit>().loadProfile();
-            },
-            icon: const Icon(Icons.refresh),
-            label: Text(
-              languageCubit.getLocalizedText(
-                korean: '다시 시도',
-                english: 'Try Again',
-                hardWords: [],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Offline content widget
-  Widget _buildOfflineContent(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final languageCubit = context.read<LanguagePreferenceCubit>();
-    
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(
-            Icons.wifi_off,
-            size: 48,
-            color: Colors.grey,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            languageCubit.getLocalizedText(
-              korean: '오프라인 상태',
-              english: 'You\'re Offline',
-              hardWords: ['오프라인 상태'],
-            ),
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32.0),
-            child: Text(
-              languageCubit.getLocalizedText(
-                korean: '인터넷 연결을 확인하고 다시 시도해 주세요.',
-                english: 'Please check your internet connection and try again.',
-                hardWords: [],
-              ),
-              style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () {
-              context.read<ConnectivityCubit>().checkConnectivity();
-              if (context.read<ConnectivityCubit>().state is ConnectivityConnected) {
-                context.read<ProfileCubit>().loadProfile();
-              }
-            },
-            icon: const Icon(Icons.refresh),
-            label: Text(
-              languageCubit.getLocalizedText(
-                korean: '다시 시도',
-                english: 'Try Again',
-                hardWords: [],
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
