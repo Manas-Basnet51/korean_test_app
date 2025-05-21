@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "1016961711599",
+    "project_id": "language-test-app-66c35",
+    "storage_bucket": "language-test-app-66c35.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1016961711599:android:43738c71266a9ed5c0ca1a",
+        "android_client_info": {
+          "package_name": "com.manasbasnet.koreanlanguageapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1016961711599-mpkud5ivkgth0c5vif8lipa2l2t46ra9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.manasbasnet.koreanlanguageapp",
+            "certificate_hash": "82e08ceac2da9c9fb6135404d819c8dff07be24d"
+          }
+        },
+        {
+          "client_id": "1016961711599-ifrl7ac456molbjbscihjjo23gn15cii.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDasav0t4CQMuE95hJHbYw7hlbrI1qzHPQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1016961711599-ifrl7ac456molbjbscihjjo23gn15cii.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "1016961711599-lp4i38dnjcplu6b294phanag63457641.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.manasbasnet.koreanlanguageapp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

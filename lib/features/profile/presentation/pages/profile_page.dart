@@ -1,0 +1,492 @@
+import 'dart:developer';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:korean_language_app/core/routes/app_router.dart';
+import 'package:korean_language_app/features/admin/presentation/bloc/admin_permission_cubit.dart';
+import 'package:korean_language_app/features/auth/presentation/bloc/auth_cubit.dart';
+import 'package:korean_language_app/core/presentation/connectivity/bloc/connectivity_cubit.dart';
+import 'package:korean_language_app/core/presentation/language_preference/bloc/language_preference_cubit.dart';
+import 'package:korean_language_app/features/profile/presentation/bloc/profile_cubit.dart';
+import 'package:korean_language_app/core/presentation/snackbar/bloc/snackbar_cubit.dart';
+import 'package:korean_language_app/core/presentation/theme/bloc/theme_cubit.dart';
+import 'package:korean_language_app/core/presentation/widgets/errors/error_boundary_widget.dart';
+
+part '../widgets/profile_content.dart';
+part '../widgets/profile_header.dart';
+part '../widgets/profile_stats.dart';
+part '../widgets/profile_settings.dart';
+
+class ProfilePage extends StatefulWidget {
+  const ProfilePage({super.key});
+
+  @override
+  State<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> {
+  late ConnectivityCubit _connectivityCubit;
+  bool _isInitialized = false;
+  
+  @override
+  void initState() {
+    super.initState();
+    _connectivityCubit = context.read<ConnectivityCubit>();
+    
+    // Trigger connectivity check on init
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _connectivityCubit.checkConnectivity();
+      setState(() {
+        _isInitialized = true;
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final snackBarCubit = context.read<SnackBarCubit>();
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDarkMode = theme.brightness == Brightness.dark;
+    
+    final languageCubit = context.watch<LanguagePreferenceCubit>();
+    final themeText = isDarkMode 
+        ? languageCubit.getLocalizedText(
+            korean: '다크 모드',
+            english: 'Dark Mode',
+            hardWords: ['다크 모드'],
+          )
+        : languageCubit.getLocalizedText(
+            korean: '라이트 모드',
+            english: 'Light Mode',
+            hardWords: ['라이트 모드'],
+          );
+    
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          languageCubit.getLocalizedText(
+            korean: '내 프로필',
+            english: 'My Profile',
+            hardWords: [],
+          ),
+          style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+        ),
+        elevation: 0,
+        backgroundColor: colorScheme.surface,
+        actions: [
+          // One-click theme toggle button
+          BlocBuilder<ThemeCubit, ThemeMode>(
+            builder: (context, themeMode) {
+              return IconButton(
+                icon: Icon(
+                  isDarkMode ? Icons.light_mode : Icons.dark_mode,
+                  color: colorScheme.primary,
+                ),
+                tooltip: isDarkMode 
+                  ? languageCubit.getLocalizedText(
+                      korean: '라이트 모드로 전환',
+                      english: 'Switch to Light Mode',
+                      hardWords: ['전환'],
+                    )
+                  : languageCubit.getLocalizedText(
+                      korean: '다크 모드로 전환',
+                      english: 'Switch to Dark Mode',
+                      hardWords: ['전환'],
+                    ),
+                onPressed: () {
+                  final themeCubit = context.read<ThemeCubit>();
+                  isDarkMode ? themeCubit.setLightTheme() : themeCubit.setDarkTheme();
+                },
+              );
+            },
+          ),
+        ],
+      ),
+      body: BlocBuilder<ConnectivityCubit, ConnectivityState>(
+        builder: (context, connectivityState) {
+          // Check for connectivity issues
+          final bool isOffline = connectivityState is ConnectivityDisconnected;
+          
+          // Show network error banner if offline but allow content to still be visible
+          return Column(
+            children: [
+              // Connectivity status banner
+              if (isOffline)
+                _buildOfflineBanner(context),
+                
+              // Profile content with error handling
+              Expanded(
+                child: BlocConsumer<ProfileCubit, ProfileState>(
+                  listener: (context, state) {
+                    if (state is ProfileError) {
+                      snackBarCubit.showErrorLocalized(
+                        korean: '오류가 발생했습니다. 다시 시도해주세요.',
+                        english: 'An error occurred. Please try again.',
+                      );
+                    }
+                    
+                    // Handle operation status changes
+                    if (state is ProfileLoaded) {
+                      final operation = state.currentOperation;
+                      
+                      // Only show messages for operations that just completed or failed
+                      if (operation.status == ProfileOperationStatus.inProgress) {
+                        String message = _getOperationProgressMessage(operation.type, languageCubit);
+                        snackBarCubit.showProgressLocalized(
+                          korean: message,
+                          english: message,
+                        );
+                      } else if (operation.status == ProfileOperationStatus.completed) {
+                        String message = _getOperationSuccessMessage(operation.type, languageCubit);
+                        snackBarCubit.showSuccessLocalized(
+                          korean: message,
+                          english: message,
+                        );
+                      } else if (operation.status == ProfileOperationStatus.failed) {
+                        String message = operation.message ?? 
+                          languageCubit.getLocalizedText(
+                            korean: '작업 실패. 다시 시도해주세요.',
+                            english: 'Operation failed. Please try again.',
+                          );
+                        snackBarCubit.showErrorLocalized(
+                          korean: message,
+                          english: message,
+                        );
+                      }
+                    }
+                  },
+                  builder: (context, state) {
+                    // Show loading indicator when initializing
+                    if (!_isInitialized || state is ProfileInitial) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    
+                    // If offline and no cached data, show offline message
+                    if (isOffline && state is ProfileLoading) {
+                      return _buildOfflineContent(context);
+                    }
+                    
+                    // If loading (and online), show loading indicator
+                    if (state is ProfileLoading) {
+                      return Center(
+                        child: CircularProgressIndicator(color: colorScheme.primary),
+                      );
+                    } 
+                    
+                    // If profile loaded successfully, show profile content
+                    else if (state is ProfileLoaded) {
+                      return ProfileContent(
+                        profileData: state,
+                        themeText: themeText,
+                      );
+                    } 
+                    
+                    // If error but cached data available, show cached data with error banner
+                    else if (state is ProfileError && context.read<ProfileCubit>().cachedProfile != null) {
+                      return Column(
+                        children: [
+                          _buildErrorBanner(context, state.message),
+                          Expanded(
+                            child: ProfileContent(
+                              profileData: context.read<ProfileCubit>().cachedProfile!,
+                              themeText: themeText,
+                            ),
+                          ),
+                        ],
+                      );
+                    } 
+                    
+                    // If error and no cached data, show error message with retry button
+                    else if (state is ProfileError) {
+                      log(state.message);
+                      return _buildErrorContent(context, state.message);
+                    } 
+                    
+                    // Default case (not logged in)
+                    else {
+                      return Center(
+                        child: Text(
+                          languageCubit.getLocalizedText(
+                            korean: '프로필을 보려면 로그인하세요',
+                            english: 'Please log in to view your profile',
+                            hardWords: ['로그인하세요'],
+                          ),
+                          style: theme.textTheme.bodyLarge,
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // Offline banner widget
+  Widget _buildOfflineBanner(BuildContext context) {
+    final theme = Theme.of(context);
+    final languageCubit = context.read<LanguagePreferenceCubit>();
+    
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      color: Colors.amber.shade700,
+      child: Row(
+        children: [
+          const Icon(Icons.wifi_off, color: Colors.white, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              languageCubit.getLocalizedText(
+                korean: '오프라인 모드. 일부 기능이 제한됩니다.',
+                english: 'You\'re offline. Some features may be limited.',
+                hardWords: ['오프라인 모드'],
+              ),
+              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              context.read<ConnectivityCubit>().checkConnectivity();
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              visualDensity: VisualDensity.compact,
+            ),
+            child: Text(
+              languageCubit.getLocalizedText(
+                korean: '다시 시도',
+                english: 'Retry',
+                hardWords: [],
+              ),
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Error banner widget
+  Widget _buildErrorBanner(BuildContext context, String message) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final languageCubit = context.read<LanguagePreferenceCubit>();
+    
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      color: colorScheme.error,
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: Colors.white, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              languageCubit.getLocalizedText(
+                korean: '데이터 로드 중 오류가 발생했습니다. 캐시된 데이터를 표시합니다.',
+                english: 'Error loading data. Showing cached data.',
+                hardWords: ['캐시된 데이터'],
+              ),
+              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              context.read<ProfileCubit>().loadProfile();
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              visualDensity: VisualDensity.compact,
+            ),
+            child: Text(
+              languageCubit.getLocalizedText(
+                korean: '다시 시도',
+                english: 'Retry',
+                hardWords: [],
+              ),
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Error content widget
+  Widget _buildErrorContent(BuildContext context, String message) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final languageCubit = context.read<LanguagePreferenceCubit>();
+    
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.error_outline,
+            size: 48,
+            color: colorScheme.error,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            languageCubit.getLocalizedText(
+              korean: '오류',
+              english: 'Error',
+              hardWords: ['오류'],
+            ),
+            style: theme.textTheme.titleLarge?.copyWith(
+              color: colorScheme.error,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32.0),
+            child: Text(
+              message,
+              style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: () {
+              // Retry loading the profile
+              context.read<ProfileCubit>().loadProfile();
+            },
+            icon: const Icon(Icons.refresh),
+            label: Text(
+              languageCubit.getLocalizedText(
+                korean: '다시 시도',
+                english: 'Try Again',
+                hardWords: [],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Offline content widget
+  Widget _buildOfflineContent(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final languageCubit = context.read<LanguagePreferenceCubit>();
+    
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            Icons.wifi_off,
+            size: 48,
+            color: Colors.grey,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            languageCubit.getLocalizedText(
+              korean: '오프라인 상태',
+              english: 'You\'re Offline',
+              hardWords: ['오프라인 상태'],
+            ),
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32.0),
+            child: Text(
+              languageCubit.getLocalizedText(
+                korean: '인터넷 연결을 확인하고 다시 시도해 주세요.',
+                english: 'Please check your internet connection and try again.',
+                hardWords: [],
+              ),
+              style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: () {
+              context.read<ConnectivityCubit>().checkConnectivity();
+              if (context.read<ConnectivityCubit>().state is ConnectivityConnected) {
+                context.read<ProfileCubit>().loadProfile();
+              }
+            },
+            icon: const Icon(Icons.refresh),
+            label: Text(
+              languageCubit.getLocalizedText(
+                korean: '다시 시도',
+                english: 'Try Again',
+                hardWords: [],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  // Helper method to get appropriate operation progress message
+  String _getOperationProgressMessage(ProfileOperationType? type, LanguagePreferenceCubit languageCubit) {
+    switch (type) {
+      case ProfileOperationType.updateProfile:
+        return languageCubit.getLocalizedText(
+          korean: '프로필 업데이트 중...',
+          english: 'Updating profile...',
+        );
+      case ProfileOperationType.uploadImage:
+        return languageCubit.getLocalizedText(
+          korean: '프로필 이미지 업로드 중...',
+          english: 'Uploading profile image...',
+        );
+      case ProfileOperationType.removeImage:
+        return languageCubit.getLocalizedText(
+          korean: '프로필 이미지 제거 중...',
+          english: 'Removing profile image...',
+        );
+      default:
+        return languageCubit.getLocalizedText(
+          korean: '작업 처리 중...',
+          english: 'Processing...',
+        );
+    }
+  }
+  
+  // Helper method to get appropriate operation success message
+  String _getOperationSuccessMessage(ProfileOperationType? type, LanguagePreferenceCubit languageCubit) {
+    switch (type) {
+      case ProfileOperationType.updateProfile:
+        return languageCubit.getLocalizedText(
+          korean: '프로필이 성공적으로 업데이트되었습니다',
+          english: 'Profile updated successfully',
+        );
+      case ProfileOperationType.uploadImage:
+        return languageCubit.getLocalizedText(
+          korean: '프로필 이미지가 성공적으로 업로드되었습니다',
+          english: 'Profile image uploaded successfully',
+        );
+      case ProfileOperationType.removeImage:
+        return languageCubit.getLocalizedText(
+          korean: '프로필 이미지가 성공적으로 제거되었습니다',
+          english: 'Profile image removed successfully',
+        );
+      default:
+        return languageCubit.getLocalizedText(
+          korean: '작업이 완료되었습니다',
+          english: 'Operation completed successfully',
+        );
+    }
+  }
+}
