@@ -1,7 +1,8 @@
+import 'dart:developer';
+
+import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:korean_language_app/core/data/base_state.dart';
 import 'package:korean_language_app/core/enums/course_category.dart';
-import 'package:korean_language_app/core/errors/api_result.dart';
 import 'package:korean_language_app/features/books/domain/repositories/favorite_book_repository.dart';
 import 'package:korean_language_app/features/books/data/models/book_item.dart';
 
@@ -10,144 +11,102 @@ part 'favorite_books_state.dart';
 class FavoriteBooksCubit extends Cubit<FavoriteBooksState> {
   final FavoriteBookRepository repository;
   
-  FavoriteBooksCubit(this.repository) : super(const FavoriteBooksState());
+  FavoriteBooksCubit(this.repository) : super(FavoriteBooksInitial());
   
-  Future<void> loadInitialBooks() async {
-    if (state.books.isEmpty) {
-      emit(state.copyWith(isLoading: true));
+  Future loadInitialBooks() async {
+    log('loadFavInitialBooks');
+    
+    state is FavoriteBooksLoaded ? null : emit(FavoriteBooksLoading());
+    
+    try {
+      List<BookItem> books = await repository.getBooksFromCache();
+
+      // Ensure no duplicates in the cached books
+      final uniqueBooks = _removeDuplicates(books);
+      
+      bool hasMoreBooks;
+      
+      if(state is FavoriteBooksLoaded) {
+        hasMoreBooks = (state as FavoriteBooksLoaded).hasMore;
+      }
+      else {
+        hasMoreBooks = await repository.hasMoreBooks(CourseCategory.favorite, uniqueBooks.length);
+      }
+      
+      emit(FavoriteBooksLoaded(uniqueBooks, hasMoreBooks));
+    } catch (e) {
+      emit(FavoriteBooksError('Failed to load Favorite books: $e'));
     }
-    
-    final result = await repository.getBooksFromCache();
-    
-    result.fold(
-      onSuccess: (books) async {
-        final uniqueBooks = _removeDuplicates(books);
-        final hasMoreResult = await repository.hasMoreBooks(
-          CourseCategory.favorite, 
-          uniqueBooks.length
-        );
-        
-        final hasMore = hasMoreResult.fold(
-          onSuccess: (hasMore) => hasMore,
-          onFailure: (_, __) => false,
-        );
-        
-        emit(state.copyWith(
-          books: uniqueBooks,
-          hasMore: hasMore,
-          isLoading: false,
-          error: null,
-          errorType: null,
-        ));
-      },
-      onFailure: (message, type) {
-        emit(state.copyWith(
-          isLoading: false,
-          error: message,
-          errorType: type,
-        ));
-      },
-    );
   }
   
-  Future<void> hardRefresh() async {
-    emit(state.copyWith(isLoading: true));
+  // Hard refresh function
+  Future hardRefresh() async {
+    log('hardRefreshFav');
+    emit(FavoriteBooksLoading());
     
-    final result = await repository.hardRefreshBooks(CourseCategory.favorite);
-    
-    result.fold(
-      onSuccess: (books) async {
-        final uniqueBooks = _removeDuplicates(books);
-        final hasMoreResult = await repository.hasMoreBooks(
-          CourseCategory.favorite, 
-          uniqueBooks.length
-        );
-        
-        final hasMore = hasMoreResult.fold(
-          onSuccess: (hasMore) => hasMore,
-          onFailure: (_, __) => false,
-        );
-        
-        emit(state.copyWith(
-          books: uniqueBooks,
-          hasMore: hasMore,
-          isLoading: false,
-          error: null,
-          errorType: null,
-        ));
-      },
-      onFailure: (message, type) {
-        emit(state.copyWith(
-          isLoading: false,
-          error: message,
-          errorType: type,
-        ));
-      },
-    );
+    try {
+      final books = await repository.getBooksFromCache();
+      // Ensure no duplicates in the refreshed books
+      final uniqueBooks = _removeDuplicates(books);
+      
+      final hasMore = await repository.hasMoreBooks(CourseCategory.favorite, uniqueBooks.length);
+      
+      emit(FavoriteBooksLoaded(uniqueBooks, hasMore));
+    } catch (e) {
+      emit(FavoriteBooksError('Failed to refresh Favorite books: $e'));
+    }
   }
   
-  Future<void> searchBooks(String query) async {
-    emit(state.copyWith(isLoading: true));
+  Future searchBooks(String query) async {
+
+    emit(FavoriteBooksLoading());
     
-    final result = await repository.searchBooks(CourseCategory.favorite, query);
-    
-    result.fold(
-      onSuccess: (books) {
-        emit(state.copyWith(
-          books: _removeDuplicates(books),
-          hasMore: false,
-          isLoading: false,
-          error: null,
-          errorType: null,
-        ));
-      },
-      onFailure: (message, type) {
-        emit(state.copyWith(
-          isLoading: false,
-          error: message,
-          errorType: type,
-        ));
-      },
-    );
+    try {
+      final searchResults = await repository.searchBooks(CourseCategory.favorite, query);
+      
+      // Ensure no duplicates in search results
+      final uniqueSearchResults = _removeDuplicates(searchResults);
+      
+      // Emit the search results - no pagination for search results so hasMore is false
+      emit(FavoriteBooksLoaded(uniqueSearchResults, false));
+    } catch (e) {
+      emit(FavoriteBooksError('Failed to search books: $e'));
+    }
   }
 
   Future<void> toggleFavorite(BookItem bookItem) async {
-    final currentBooks = state.books;
-    final bool isAlreadyFavorite = currentBooks.any((book) => book.id == bookItem.id);
-    
-    final result = isAlreadyFavorite
-        ? await repository.removeBookFromFavorite(bookItem)
-        : await repository.addFavoritedBook(bookItem);
+    try {
+      List<BookItem> updatedBooks = [];
+      
+      // Check if book is already in favorites
+      if (state is FavoriteBooksLoaded) {
+        final currentBooks = (state as FavoriteBooksLoaded).books;
+        final bool isAlreadyFavorite = currentBooks.any((book) => book.id == bookItem.id);
         
-    result.fold(
-      onSuccess: (updatedBooks) async {
-        final hasMoreResult = await repository.hasMoreBooks(
-          CourseCategory.favorite, 
-          updatedBooks.length
-        );
+        // If already in favorites, remove it
+        if (isAlreadyFavorite) {
+          updatedBooks = await repository.removeBookFromFavorite(bookItem);
+        } 
+        // If not in favorites, add it
+        else {
+          updatedBooks = await repository.addFavoritedBook(bookItem);
+        }
         
-        final hasMore = hasMoreResult.fold(
-          onSuccess: (hasMore) => hasMore,
-          onFailure: (_, __) => false,
-        );
-        
-        emit(state.copyWith(
-          books: _removeDuplicates(updatedBooks),
-          hasMore: hasMore,
-          error: null,
-          errorType: null,
-        ));
-      },
-      onFailure: (message, type) {
-        emit(state.copyWith(
-          error: message,
-          errorType: type,
-        ));
-        loadInitialBooks(); // Recover from error by reloading
-      },
-    );
+        final hasMore = await repository.hasMoreBooks(CourseCategory.favorite, updatedBooks.length);
+        emit(FavoriteBooksLoaded(updatedBooks, hasMore));
+      } else {
+        // If state is not loaded yet, just add the book
+        updatedBooks = await repository.addFavoritedBook(bookItem);
+        emit(FavoriteBooksLoaded(updatedBooks, false));
+      }
+    } catch (e) {
+      emit(FavoriteBooksError('Failed to toggle favorite status: $e'));
+      // Reload the original favorites to recover from error
+      loadInitialBooks();
+    }
   }
   
+  // Helper method to remove duplicate books based on ID
   List<BookItem> _removeDuplicates(List<BookItem> books) {
     final uniqueIds = <String>{};
     final uniqueBooks = <BookItem>[];

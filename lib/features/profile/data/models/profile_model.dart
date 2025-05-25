@@ -5,6 +5,7 @@ class ProfileModel extends Equatable {
   final String name;
   final String email;
   final String profileImageUrl;
+  final String? profileImagePath;
   final String topikLevel;
   final int completedTests;
   final double averageScore;
@@ -15,6 +16,7 @@ class ProfileModel extends Equatable {
     required this.name,
     required this.email,
     this.profileImageUrl = '',
+    this.profileImagePath,
     this.topikLevel = 'I',
     this.completedTests = 0,
     this.averageScore = 0.0,
@@ -25,6 +27,7 @@ class ProfileModel extends Equatable {
     String? name,
     String? email,
     String? profileImageUrl,
+    String? profileImagePath,
     String? topikLevel,
     int? completedTests,
     double? averageScore,
@@ -35,6 +38,7 @@ class ProfileModel extends Equatable {
       name: name ?? this.name,
       email: email ?? this.email,
       profileImageUrl: profileImageUrl ?? this.profileImageUrl,
+      profileImagePath: profileImagePath ?? this.profileImagePath,
       topikLevel: topikLevel ?? this.topikLevel,
       completedTests: completedTests ?? this.completedTests,
       averageScore: averageScore ?? this.averageScore,
@@ -48,6 +52,7 @@ class ProfileModel extends Equatable {
         name,
         email,
         profileImageUrl,
+        profileImagePath, // Added to props
         topikLevel,
         completedTests,
         averageScore,

@@ -10,7 +10,8 @@ abstract class ProfileDataSource {
   Future<ApiResult<(bool, String)>> checkAvailability();
   Future<ApiResult<Map<String, dynamic>>> getProfile(String userId);
   Future<ApiResult<void>> updateProfile(String userId, Map<String, dynamic> data);
-  Future<ApiResult<String>> uploadProfileImage(String userId, String filePath);
+  Future<ApiResult<(String, String)>> uploadProfileImage(String userId, String filePath); // Changed return type
+  Future<ApiResult<String?>> regenerateUrlFromPath(String storagePath); // Added method
 }
 // Firestore implementation of ProfileDataSource
 class FirestoreProfileDataSource extends BaseDataSource implements ProfileDataSource {
@@ -81,11 +82,36 @@ class FirestoreProfileDataSource extends BaseDataSource implements ProfileDataSo
   }
 
   @override
-  Future<ApiResult<String>> uploadProfileImage(String userId, String filePath) {
+  Future<ApiResult<(String, String)>> uploadProfileImage(String userId, String filePath) {
     return handleAsyncDataSourceCall(() async {
-      final fileRef = storage.ref().child('profile_images/$userId.jpg');
+      final storagePath = 'profile_images/$userId.jpg';
+      final fileRef = storage.ref().child(storagePath);
       final uploadTask = await fileRef.putFile(File(filePath));
-      return await uploadTask.ref.getDownloadURL();
+      final downloadUrl = await uploadTask.ref.getDownloadURL();
+      return (downloadUrl, storagePath); // Return both URL and storage path
+    });
+  }
+
+  @override
+  Future<ApiResult<String?>> regenerateUrlFromPath(String storagePath) {
+    return handleAsyncDataSourceCall(() async {
+      if (storagePath.isEmpty) {
+        return null;
+      }
+      
+      try {
+        final fileRef = storage.ref().child(storagePath);
+        final newUrl = await fileRef.getDownloadURL();
+        
+        // Log for debugging
+        log('Original storage path: $storagePath');
+        log('Regenerated URL: $newUrl');
+        
+        return newUrl;
+      } catch (e) {
+        log('Error in regenerateUrlFromPath: ${e.toString()}');
+        rethrow;
+      }
     });
   }
 }

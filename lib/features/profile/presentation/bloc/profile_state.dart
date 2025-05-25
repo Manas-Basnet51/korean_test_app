@@ -60,6 +60,7 @@ class ProfileLoaded extends ProfileState {
   final String name;
   final String email;
   final String profileImageUrl;
+  final String? profileImagePath; // Added field
   final String topikLevel;
   final int completedTests;
   final double averageScore;
@@ -74,6 +75,7 @@ class ProfileLoaded extends ProfileState {
     required this.name,
     required this.email,
     required this.profileImageUrl,
+    this.profileImagePath, // Added parameter
     required this.topikLevel,
     required this.completedTests,
     required this.averageScore,
@@ -87,6 +89,7 @@ class ProfileLoaded extends ProfileState {
       name: model.name,
       email: model.email,
       profileImageUrl: model.profileImageUrl,
+      profileImagePath: model.profileImagePath, // Added
       topikLevel: model.topikLevel,
       completedTests: model.completedTests,
       averageScore: model.averageScore,
@@ -101,6 +104,7 @@ class ProfileLoaded extends ProfileState {
       name: name,
       email: email,
       profileImageUrl: profileImageUrl,
+      profileImagePath: profileImagePath, // Added
       topikLevel: topikLevel,
       completedTests: completedTests,
       averageScore: averageScore,
@@ -123,6 +127,7 @@ class ProfileLoaded extends ProfileState {
       name: name,
       email: email,
       profileImageUrl: profileImageUrl,
+      profileImagePath: profileImagePath, // Added
       topikLevel: topikLevel,
       completedTests: completedTests,
       averageScore: averageScore,
@@ -141,6 +146,7 @@ class ProfileLoaded extends ProfileState {
         name,
         email,
         profileImageUrl,
+        profileImagePath, // Added
         topikLevel,
         completedTests,
         averageScore,

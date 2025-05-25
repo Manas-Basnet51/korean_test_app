@@ -1,55 +1,41 @@
 part of 'favorite_books_cubit.dart';
 
-class FavoriteBooksState extends BaseState {
+abstract class FavoriteBooksState extends Equatable{}
+
+class FavoriteBooksInitial extends FavoriteBooksState {
+  @override
+  List<Object?> get props => [];
+}
+
+class FavoriteBooksLoading extends FavoriteBooksState {
+  @override
+  List<Object?> get props => [];
+}
+
+class FavoriteBooksLoaded extends FavoriteBooksState {
   final List<BookItem> books;
   final bool hasMore;
-  final bool isLoadingMore;
-
-  const FavoriteBooksState({
-    super.isLoading = false,
-    super.error,
-    super.errorType,
-    this.books = const [],
-    this.hasMore = false,
-    this.isLoadingMore = false,
-  });
-
+  
+  FavoriteBooksLoaded(this.books, this.hasMore);
+  
   @override
-  List<Object?> get props => [
-    ...super.props,
-    books,
-    hasMore,
-    isLoadingMore,
-  ];
+  List<Object?> get props => [books,hasMore];
+}
 
+class FavoriteBooksLoadingMore extends FavoriteBooksState {
+  final List<BookItem> currentBooks;
+  
+  FavoriteBooksLoadingMore(this.currentBooks);
+  
   @override
-  FavoriteBooksState copyWithBaseState({
-    bool? isLoading,
-    String? error,
-    FailureType? errorType,
-  }) {
-    return copyWith(
-      isLoading: isLoading,
-      error: error,
-      errorType: errorType,
-    );
-  }
+  List<Object?> get props => [currentBooks];
+}
 
-  FavoriteBooksState copyWith({
-    bool? isLoading,
-    String? error,
-    FailureType? errorType,
-    List<BookItem>? books,
-    bool? hasMore,
-    bool? isLoadingMore,
-  }) {
-    return FavoriteBooksState(
-      isLoading: isLoading ?? this.isLoading,
-      error: error,
-      errorType: errorType,
-      books: books ?? this.books,
-      hasMore: hasMore ?? this.hasMore,
-      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
-    );
-  }
+class FavoriteBooksError extends FavoriteBooksState {
+  final String message;
+  
+  FavoriteBooksError(this.message);
+  
+  @override
+  List<Object?> get props => [message];
 }

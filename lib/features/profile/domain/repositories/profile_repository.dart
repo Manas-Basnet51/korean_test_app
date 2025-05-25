@@ -5,5 +5,6 @@ abstract class ProfileRepository {
   Future<ApiResult<(bool,String)>> checkAvailability();
   Future<ApiResult<ProfileModel>> getProfile(String userId);
   Future<ApiResult<void>> updateProfile(ProfileModel profile);
-  Future<ApiResult<String>> uploadProfileImage(String filePath);
+  Future<ApiResult<(String, String)>> uploadProfileImage(String filePath); // Changed return type
+  Future<ApiResult<String?>> regenerateProfileImageUrl(String storagePath); // Added method
 }

@@ -44,12 +44,12 @@ class ProfileCubit extends Cubit<ProfileState> {
     try {
       // Only show loading state if we don't have cached data
       if (_cachedProfile == null) {
-        emit(ProfileState(isLoading: true));
+        emit(const ProfileState(isLoading: true));
       }
       
       final currentUser = auth.currentUser;
       if (currentUser == null) {
-        emit(ProfileState(error: 'User not authenticated', errorType: FailureType.auth));
+        emit(const ProfileState(error: 'User not authenticated', errorType: FailureType.auth));
         return;
       }
 
@@ -212,12 +212,16 @@ class ProfileCubit extends Cubit<ProfileState> {
         final imageUrlResult = await profileRepository.uploadProfileImage(filePath);
         
         imageUrlResult.fold(
-          onSuccess: (imageUrl) async {
+          onSuccess: (uploadResult) async {
+            final imageUrl = uploadResult.$1;
+            final storagePath = uploadResult.$2;
+            
             final updatedProfile = ProfileModel(
               id: currentState.id,
               name: currentState.name,
               email: currentState.email,
               profileImageUrl: imageUrl,
+              profileImagePath: storagePath, // Save the storage path
               topikLevel: currentState.topikLevel,
               completedTests: currentState.completedTests,
               averageScore: currentState.averageScore,
@@ -310,7 +314,8 @@ class ProfileCubit extends Cubit<ProfileState> {
           id: currentState.id,
           name: currentState.name,
           email: currentState.email,
-          profileImageUrl: '', // Clear the profile image URL
+          profileImageUrl: '',
+          profileImagePath: '',
           topikLevel: currentState.topikLevel,
           completedTests: currentState.completedTests,
           averageScore: currentState.averageScore,
@@ -371,6 +376,80 @@ class ProfileCubit extends Cubit<ProfileState> {
       } else {
         emit(ProfileState(error: e.toString()));
       }
+    }
+  }
+
+  Future<void> regenerateProfileImageUrl(ProfileLoaded currentProfile) async {
+    try {
+      if (currentProfile.profileImagePath == null || 
+          currentProfile.profileImagePath!.isEmpty) {
+        return;
+      }
+
+      log('Attempting to regenerate profile image URL from path: ${currentProfile.profileImagePath}');
+      
+      final result = await profileRepository.regenerateProfileImageUrl(
+          currentProfile.profileImagePath!);
+      
+      result.fold(
+        onSuccess: (newUrl) async {  // Add async here
+          if (newUrl != null) {
+            log('Successfully regenerated URL: $newUrl');
+            
+            final updatedProfile = ProfileModel(
+              id: currentProfile.id,
+              name: currentProfile.name,
+              email: currentProfile.email,
+              profileImageUrl: newUrl,
+              profileImagePath: currentProfile.profileImagePath,
+              topikLevel: currentProfile.topikLevel,
+              completedTests: currentProfile.completedTests,
+              averageScore: currentProfile.averageScore,
+              mobileNumber: currentProfile.mobileNumber,
+            );
+            
+            // Update profile in database - this is the critical part that was missing
+            final updateResult = await profileRepository.updateProfile(updatedProfile);
+            
+            updateResult.fold(
+              onSuccess: (_) {
+                // Update the UI state with new profile
+                final loadedProfile = ProfileLoaded.fromModel(
+                  updatedProfile,
+                  operation: ProfileOperation(status: ProfileOperationStatus.completed),
+                );
+                
+                // Update cache
+                _cachedProfile = loadedProfile;
+                
+                emit(loadedProfile);
+                log('Profile updated in database with regenerated URL');
+              },
+              onFailure: (message, type) {
+                log('Failed to update profile in database: $message');
+                emit(ProfileState(error: message, errorType: type));
+                if (_cachedProfile != null) {
+                  Future.delayed(const Duration(milliseconds: 100), () {
+                    emit(_cachedProfile!);
+                  });
+                }
+              }
+            );
+          }
+        },
+        onFailure: (message, type) {
+          log('Failed to regenerate URL: $message');
+          // If regeneration fails, keep showing the profile but emit error
+          emit(ProfileState(error: message, errorType: type));
+          Future.delayed(const Duration(milliseconds: 100), () {
+            if (_cachedProfile != null) {
+              emit(_cachedProfile!);
+            }
+          });
+        },
+      );
+    } catch (e) {
+      log('Error regenerating URL: ${e.toString()}');
     }
   }
   

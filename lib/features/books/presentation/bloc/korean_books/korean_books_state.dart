@@ -1,65 +1,71 @@
 part of 'korean_books_cubit.dart';
 
-class KoreanBooksState extends BaseState {
+abstract class KoreanBooksState extends Equatable {
+  const KoreanBooksState();
+  
+  @override
+  List<Object?> get props => [];
+}
+class KoreanBooksInitial extends KoreanBooksState {}
+
+class KoreanBooksLoading extends KoreanBooksState {}
+
+class KoreanBooksLoaded extends KoreanBooksState {
   final List<BookItem> books;
   final bool hasMore;
-  final File? loadedPdfFile;
-  final String? pdfLoadingBookId;
-  final bool isLoadingMore;
-
-  const KoreanBooksState({
-    super.isLoading = false,
-    super.error,
-    super.errorType,
-    this.books = const [],
-    this.hasMore = false,
-    this.loadedPdfFile,
-    this.pdfLoadingBookId,
-    this.isLoadingMore = false,
-  });
-
+  
+  const KoreanBooksLoaded(this.books, this.hasMore);
+  
   @override
-  List<Object?> get props => [
-    ...super.props,
-    books,
-    hasMore,
-    loadedPdfFile,
-    pdfLoadingBookId,
-    isLoadingMore,
-  ];
-
+  List<Object?> get props => [books, hasMore];
+}
+class KoreanBooksLoadingMore extends KoreanBooksState {
+  final List<BookItem> currentBooks;
+  
+  const KoreanBooksLoadingMore(this.currentBooks);
+  
   @override
-  KoreanBooksState copyWithBaseState({
-    bool? isLoading,
-    String? error,
-    FailureType? errorType,
-  }) {
-    return copyWith(
-      isLoading: isLoading,
-      error: error,
-      errorType: errorType,
-    );
-  }
+  List<Object?> get props => [currentBooks];
+}
+class KoreanBooksError extends KoreanBooksState {
+  final String message;
+  
+  const KoreanBooksError(this.message);
+  
+  @override
+  List<Object?> get props => [message];
+}
+class KoreanBookPdfLoading extends KoreanBooksState {
+  final String bookId;
+  final List<BookItem> books;
+  final bool hasMore;
+  
+  const KoreanBookPdfLoading(this.bookId, this.books, this.hasMore);
+  
+  @override
+  List<Object?> get props => [bookId, books, hasMore];
+}
 
-  KoreanBooksState copyWith({
-    bool? isLoading,
-    String? error,
-    FailureType? errorType,
-    List<BookItem>? books,
-    bool? hasMore,
-    File? loadedPdfFile,
-    String? pdfLoadingBookId,
-    bool? isLoadingMore,
-  }) {
-    return KoreanBooksState(
-      isLoading: isLoading ?? this.isLoading,
-      error: error,
-      errorType: errorType,
-      books: books ?? this.books,
-      hasMore: hasMore ?? this.hasMore,
-      loadedPdfFile: loadedPdfFile ?? this.loadedPdfFile,
-      pdfLoadingBookId: pdfLoadingBookId ?? this.pdfLoadingBookId,
-      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
-    );
-  }
+class KoreanBookPdfLoaded extends KoreanBooksState {
+  final String bookId;
+  final File pdfFile;
+  final List<BookItem> books;
+  final bool hasMore;
+  
+  const KoreanBookPdfLoaded(this.bookId, this.pdfFile, this.books, this.hasMore);
+  
+  @override
+  List<Object?> get props => [bookId, pdfFile.path, books, hasMore];
+}
+
+class KoreanBookPdfError extends KoreanBooksState {
+  final String bookId;
+  final String message;
+  final List<BookItem> books;
+  final bool hasMore;
+  
+  const KoreanBookPdfError(this.bookId, this.message, this.books, this.hasMore);
+  
+  @override
+  List<Object?> get props => [bookId, message, books, hasMore];
 }

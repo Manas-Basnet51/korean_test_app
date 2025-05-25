@@ -31,6 +31,7 @@ class ProfileRepositoryImpl extends BaseRepository implements ProfileRepository 
             name: data['name'] ?? 'User',
             email: data['email'] ?? '',
             profileImageUrl: data['profileImageUrl'] ?? '',
+            profileImagePath: data['profileImagePath'], // Added to read from Firestore
             topikLevel: data['topikLevel'] ?? 'I',
             completedTests: data['completedTests'] ?? 0,
             averageScore: data['averageScore'] ?? 0.0,
@@ -50,6 +51,7 @@ class ProfileRepositoryImpl extends BaseRepository implements ProfileRepository 
         'name': profile.name,
         'email': profile.email,
         'profileImageUrl': profile.profileImageUrl,
+        'profileImagePath': profile.profileImagePath,
         'topikLevel': profile.topikLevel,
         'completedTests': profile.completedTests,
         'averageScore': profile.averageScore,
@@ -61,7 +63,7 @@ class ProfileRepositoryImpl extends BaseRepository implements ProfileRepository 
   }
 
   @override
-  Future<ApiResult<String>> uploadProfileImage(String filePath) {
+  Future<ApiResult<(String, String)>> uploadProfileImage(String filePath) {
     return handleRepositoryCall(() async {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
@@ -72,4 +74,16 @@ class ProfileRepositoryImpl extends BaseRepository implements ProfileRepository 
       return result;
     });
   }
+
+  @override
+  Future<ApiResult<String?>> regenerateProfileImageUrl(String storagePath) {
+    return handleRepositoryCall(() async {
+      if (storagePath.isEmpty) {
+        return ApiResult.success(null);
+      }
+      
+      return await dataSource.regenerateUrlFromPath(storagePath);
+    });
+  }
+
 }

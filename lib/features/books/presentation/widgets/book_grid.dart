@@ -52,8 +52,11 @@ class BooksGrid extends StatelessWidget {
             final canEdit = snapshot.data ?? false;            
                         
             return BlocBuilder<FavoriteBooksCubit, FavoriteBooksState>(              
-              builder: (context, state) {                
-                final isFavorite = state.books.any((favBook) => favBook.id == book.id);           
+              builder: (context, favoritesState) {                
+                bool isFavorite = false;                
+                if (favoritesState is FavoriteBooksLoaded) {                  
+                  isFavorite = favoritesState.books.any((favBook) => favBook.id == book.id);                
+                }                
                                 
                 return BookGridCard(                  
                   key: ValueKey(book.id),                  

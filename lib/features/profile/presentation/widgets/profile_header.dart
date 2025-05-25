@@ -1,7 +1,7 @@
 part of '../pages/profile_page.dart';
 
-class ProfileHeaderWidget extends StatelessWidget {
-  final dynamic profileData;
+class ProfileHeaderWidget extends StatefulWidget {
+  final ProfileLoaded profileData;
   final VoidCallback onImagePickRequested;
   final VoidCallback onImageRemoved;
 
@@ -13,6 +13,11 @@ class ProfileHeaderWidget extends StatelessWidget {
   });
 
   @override
+  State<ProfileHeaderWidget> createState() => _ProfileHeaderWidgetState();
+}
+
+class _ProfileHeaderWidgetState extends State<ProfileHeaderWidget> {
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
@@ -20,8 +25,8 @@ class ProfileHeaderWidget extends StatelessWidget {
     final isStorageAvailable = profileCubit.isStorageAvailable;
     
     // Check if there's an ongoing profile image operation
-    final isUploadingImage = profileData.currentOperation?.type == ProfileOperationType.uploadImage && 
-                            profileData.currentOperation?.isInProgress == true;
+    final isUploadingImage = widget.profileData.currentOperation.type == ProfileOperationType.uploadImage && 
+                            widget.profileData.currentOperation.isInProgress == true;
     
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
@@ -72,7 +77,7 @@ class ProfileHeaderWidget extends StatelessWidget {
         if (isUploadingImage) return;
         
         if (isStorageAvailable) {
-          onImagePickRequested();
+          widget.onImagePickRequested();
         } else {
           snackBarCubit.showErrorLocalized(
             korean: '프로필 이미지 업로드를 사용할 수 없습니다. 파이어베이스 스토리지 설정이 필요합니다.', 
@@ -98,23 +103,38 @@ class ProfileHeaderWidget extends StatelessWidget {
         ),
         child: Stack(
           children: [
-            // Fixed: Only provide onBackgroundImageError when backgroundImage is not null
+              // Fixed: Only provide onBackgroundImageError when backgroundImage is not null
             CircleAvatar(
               radius: 40,
               backgroundColor: colorScheme.primaryContainer,
-              backgroundImage: profileData.profileImageUrl.isNotEmpty
-                  ? NetworkImage(profileData.profileImageUrl) as ImageProvider
+              backgroundImage: widget.profileData.profileImageUrl.isNotEmpty
+                  ? NetworkImage(widget.profileData.profileImageUrl) as ImageProvider
                   : null,
-              onBackgroundImageError: profileData.profileImageUrl.isNotEmpty
-                  ? (_, __) {
-                      // Handle image error silently
-                      log('Error loading profile image');
+              onBackgroundImageError: widget.profileData.profileImageUrl.isNotEmpty
+                  ? (exception, stackTrace) {
+                      // More detailed logging
+                      log('Error loading profile image: $exception');
+                      log('Current URL: ${widget.profileData.profileImageUrl}');
+                      
+                      if (widget.profileData.profileImagePath != null && 
+                          widget.profileData.profileImagePath!.isNotEmpty) {
+                        log('Found storage path, attempting to regenerate URL from: ${widget.profileData.profileImagePath}');
+                        
+                        // Use a slight delay to prevent too many rapid retries
+                        Future.delayed(const Duration(milliseconds: 300), () {
+                          if (mounted) {
+                            context.read<ProfileCubit>().regenerateProfileImageUrl(widget.profileData);
+                          }
+                        });
+                      } else {
+                        log('No storage path available for regeneration');
+                      }
                     }
                   : null,
-              child: (profileData.profileImageUrl.isEmpty)
+              child: (widget.profileData.profileImageUrl.isEmpty)
                   ? Text(
-                      profileData.name.isNotEmpty
-                          ? profileData.name[0].toUpperCase()
+                      widget.profileData.name.isNotEmpty
+                          ? widget.profileData.name[0].toUpperCase()
                           : '?',
                       style: theme.textTheme.headlineMedium?.copyWith(
                         color: colorScheme.onPrimaryContainer,
@@ -174,7 +194,7 @@ class ProfileHeaderWidget extends StatelessWidget {
       children: [
         // User name
         Text(
-          profileData.name,
+          widget.profileData.name,
           style: theme.textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.bold,
             color: colorScheme.onSurface,
@@ -194,7 +214,7 @@ class ProfileHeaderWidget extends StatelessWidget {
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                profileData.email,
+                widget.profileData.email,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),
@@ -235,8 +255,8 @@ class ProfileHeaderWidget extends StatelessWidget {
           const SizedBox(width: 4),
           Text(
             languageCubit.getLocalizedText(
-              korean: 'TOPIK 레벨 ${profileData.topikLevel}',
-              english: 'TOPIK Level ${profileData.topikLevel}',
+              korean: 'TOPIK 레벨 ${widget.profileData.topikLevel}',
+              english: 'TOPIK Level ${widget.profileData.topikLevel}',
               hardWords: ['레벨'],
             ),
             style: theme.textTheme.bodySmall?.copyWith(
