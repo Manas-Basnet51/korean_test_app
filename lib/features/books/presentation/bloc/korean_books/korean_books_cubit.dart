@@ -1,16 +1,18 @@
 import 'dart:developer' as dev;
 import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:korean_language_app/core/data/base_state.dart';
 import 'package:korean_language_app/core/enums/book_level.dart';
 import 'package:korean_language_app/core/enums/course_category.dart';
+import 'package:korean_language_app/core/errors/api_result.dart';
 import 'package:korean_language_app/features/admin/data/service/admin_permission.dart';
 import 'package:korean_language_app/features/auth/domain/entities/user.dart';
 import 'package:korean_language_app/features/books/domain/repositories/korean_book_repository.dart';
 import 'package:korean_language_app/features/auth/presentation/bloc/auth_cubit.dart';
 import 'package:korean_language_app/features/books/data/models/book_item.dart';
+
 part 'korean_books_state.dart';
 
 class KoreanBooksCubit extends Cubit<KoreanBooksState> {
@@ -23,106 +25,221 @@ class KoreanBooksCubit extends Cubit<KoreanBooksState> {
   bool _isConnected = true;
   final Set<String> _downloadsInProgress = {};
   
+  KoreanBooksState? _cachedState;
+  KoreanBooksState? get cachedState => _cachedState;
+  
   KoreanBooksCubit({
     required this.repository,
     required this.authCubit,
     required this.adminService,
-  }) : super(KoreanBooksInitial()) {
+  }) : super(const KoreanBooksInitial()) {
     Connectivity().onConnectivityChanged.listen((result) {
       _isConnected = result != ConnectivityResult.none;
-      if (_isConnected && state is KoreanBooksLoaded && 
-          (state as KoreanBooksLoaded).books.isEmpty) {
+      if (_isConnected && state.books.isEmpty) {
         loadInitialBooks();
       }
     });
   }
   
   Future<void> loadInitialBooks() async {
-    if (state is! KoreanBooksLoaded) {
-      emit(KoreanBooksLoading());
-    }
-    
     try {
-      List<BookItem> books = await repository.getBooks(
+      if (_cachedState == null || _cachedState!.books.isEmpty) {
+        emit(state.copyWith(
+          isLoading: true,
+          currentOperation: const KoreanBooksOperation(
+            type: KoreanBooksOperationType.loadBooks,
+            status: KoreanBooksOperationStatus.inProgress,
+          ),
+        ));
+      }
+      
+      final result = await repository.getBooks(
         CourseCategory.korean,
         page: 0,
         pageSize: _pageSize
       );
       
-      bool hasMoreBooks = await repository.hasMoreBooks(
-        CourseCategory.korean,
-        books.length
-      );
+      result.fold(
+        onSuccess: (books) async {
+          final hasMoreResult = await repository.hasMoreBooks(
+            CourseCategory.korean,
+            books.length
+          );
 
-      _currentPage = books.length ~/ _pageSize;
-      final uniqueBooks = _removeDuplicates(books);
-      
-      emit(KoreanBooksLoaded(uniqueBooks, hasMoreBooks));
+          _currentPage = books.length ~/ _pageSize;
+          final uniqueBooks = _removeDuplicates(books);
+          
+          final newState = KoreanBooksState(
+            books: uniqueBooks,
+            hasMore: hasMoreResult.fold(
+              onSuccess: (hasMore) => hasMore,
+              onFailure: (_, __) => false,
+            ),
+            currentOperation: const KoreanBooksOperation(
+              type: KoreanBooksOperationType.loadBooks,
+              status: KoreanBooksOperationStatus.completed,
+            ),
+          );
+          
+          _cachedState = newState;
+          emit(newState);
+          _clearOperationAfterDelay();
+        },
+        onFailure: (message, type) {
+          if (_cachedState != null && _cachedState!.books.isNotEmpty) {
+            emit(_cachedState!.copyWithBaseState(error: message, errorType: type));
+            Future.delayed(const Duration(milliseconds: 100), () {
+              emit(_cachedState!);
+            });
+          } else {
+            emit(state.copyWithBaseState(
+              error: message,
+              errorType: type,
+              isLoading: false,
+            ).copyWithOperation(const KoreanBooksOperation(
+              type: KoreanBooksOperationType.loadBooks,
+              status: KoreanBooksOperationStatus.failed,
+            )));
+          }
+        },
+      );
     } catch (e) {
-      emit(KoreanBooksError('Failed to load books: $e'));
+      dev.log('Error loading initial books: $e');
+      _handleError('Failed to load books: $e', KoreanBooksOperationType.loadBooks);
     }
   }
   
-  Future<void> loadMoreBooks() async {
-    final currentState = state;
+  Future<void> loadMoreBooks() async {    
+    if (!state.hasMore || !_isConnected || state.currentOperation.isInProgress) {
+      return;
+    }
     
-    if (currentState is KoreanBooksLoaded && currentState.hasMore && _isConnected) {
-      emit(KoreanBooksLoadingMore(currentState.books));
+    try {
+      emit(state.copyWith(
+        currentOperation: const KoreanBooksOperation(
+          type: KoreanBooksOperationType.loadMoreBooks,
+          status: KoreanBooksOperationStatus.inProgress,
+        ),
+      ));
       
-      try {
-        final moreBooks = await repository.getBooks(
-          CourseCategory.korean,
-          page: _currentPage + 1,
-          pageSize: _pageSize
-        );
-        
-        final existingIds = currentState.books.map((book) => book.id).toSet();
-        final uniqueNewBooks = moreBooks.where((book) => !existingIds.contains(book.id)).toList();
-        
-        if (uniqueNewBooks.isNotEmpty) {
-          final allBooks = [...currentState.books, ...uniqueNewBooks];
-          final hasMore = await repository.hasMoreBooks(CourseCategory.korean, allBooks.length);
+      final result = await repository.getBooks(
+        CourseCategory.korean,
+        page: _currentPage + 1,
+        pageSize: _pageSize
+      );
+      
+      result.fold(
+        onSuccess: (moreBooks) async {
+          final existingIds = state.books.map((book) => book.id).toSet();
+          final uniqueNewBooks = moreBooks.where((book) => !existingIds.contains(book.id)).toList();
           
-          _currentPage = allBooks.length ~/ _pageSize;
-          
-          emit(KoreanBooksLoaded(allBooks, hasMore));
-        } else {
-          emit(KoreanBooksLoaded(currentState.books, false));
-        }
-      } catch (e) {
-        emit(KoreanBooksLoaded(currentState.books, currentState.hasMore));
-      }
+          if (uniqueNewBooks.isNotEmpty) {
+            final allBooks = [...state.books, ...uniqueNewBooks];
+            final hasMoreResult = await repository.hasMoreBooks(CourseCategory.korean, allBooks.length);
+            
+            _currentPage = allBooks.length ~/ _pageSize;
+            
+            final newState = state.copyWith(
+              books: allBooks,
+              hasMore: hasMoreResult.fold(
+                onSuccess: (hasMore) => hasMore,
+                onFailure: (_, __) => false,
+              ),
+              currentOperation: const KoreanBooksOperation(
+                type: KoreanBooksOperationType.loadMoreBooks,
+                status: KoreanBooksOperationStatus.completed,
+              ),
+            );
+            
+            _cachedState = newState;
+            emit(newState);
+          } else {
+            emit(state.copyWith(
+              hasMore: false,
+              currentOperation: const KoreanBooksOperation(
+                type: KoreanBooksOperationType.loadMoreBooks,
+                status: KoreanBooksOperationStatus.completed,
+              ),
+            ));
+          }
+          _clearOperationAfterDelay();
+        },
+        onFailure: (message, type) {
+          emit(state.copyWithBaseState(error: message, errorType: type));
+          Future.delayed(const Duration(milliseconds: 100), () {
+            emit(state.copyWithOperation(const KoreanBooksOperation(
+              type: KoreanBooksOperationType.loadMoreBooks,
+              status: KoreanBooksOperationStatus.failed,
+            )));
+          });
+        },
+      );
+    } catch (e) {
+      dev.log('Error loading more books: $e');
+      _handleError('Failed to load more books: $e', KoreanBooksOperationType.loadMoreBooks);
     }
   }
   
   Future<void> hardRefresh() async {
-    if (!_isConnected) {
-      return loadInitialBooks();
-    }
-    
-    List<BookItem> currentBooks = state is KoreanBooksLoaded ? (state as KoreanBooksLoaded).books : [];
-    
-    emit(KoreanBooksLoading());
-    
     try {
+      emit(state.copyWith(
+        isLoading: true,
+        currentOperation: const KoreanBooksOperation(
+          type: KoreanBooksOperationType.refreshBooks,
+          status: KoreanBooksOperationStatus.inProgress,
+        ),
+      ));
+      
       _currentPage = 0;
-      final books = await repository.hardRefreshBooks(
+      final result = await repository.hardRefreshBooks(
         CourseCategory.korean,
         pageSize: _pageSize
       );
       
-      final uniqueBooks = _removeDuplicates(books);
-      final hasMore = await repository.hasMoreBooks(CourseCategory.korean, uniqueBooks.length);
-      
-      _currentPage = uniqueBooks.length ~/ _pageSize;
-      
-      emit(KoreanBooksLoaded(uniqueBooks, hasMore));
+      result.fold(
+        onSuccess: (books) async {
+          final uniqueBooks = _removeDuplicates(books);
+          final hasMoreResult = await repository.hasMoreBooks(CourseCategory.korean, uniqueBooks.length);
+          
+          _currentPage = uniqueBooks.length ~/ _pageSize;
+          
+          final newState = KoreanBooksState(
+            books: uniqueBooks,
+            hasMore: hasMoreResult.fold(
+              onSuccess: (hasMore) => hasMore,
+              onFailure: (_, __) => false,
+            ),
+            currentOperation: const KoreanBooksOperation(
+              type: KoreanBooksOperationType.refreshBooks,
+              status: KoreanBooksOperationStatus.completed,
+            ),
+          );
+          
+          _cachedState = newState;
+          emit(newState);
+          _clearOperationAfterDelay();
+        },
+        onFailure: (message, type) {
+          if (_cachedState != null && _cachedState!.books.isNotEmpty) {
+            emit(_cachedState!.copyWithBaseState(error: message, errorType: type));
+            Future.delayed(const Duration(milliseconds: 100), () {
+              emit(_cachedState!);
+            });
+          } else {
+            emit(state.copyWithBaseState(
+              error: message,
+              errorType: type,
+              isLoading: false,
+            ).copyWithOperation(const KoreanBooksOperation(
+              type: KoreanBooksOperationType.refreshBooks,
+              status: KoreanBooksOperationStatus.failed,
+            )));
+          }
+        },
+      );
     } catch (e) {
-      if (currentBooks.isNotEmpty) {
-        emit(KoreanBooksLoaded(currentBooks, true));
-      } else {
-        emit(KoreanBooksError('Failed to refresh books: $e'));
-      }
+      dev.log('Error refreshing books: $e');
+      _handleError('Failed to refresh books: $e', KoreanBooksOperationType.refreshBooks);
     }
   }
   
@@ -131,22 +248,55 @@ class KoreanBooksCubit extends Cubit<KoreanBooksState> {
       return;
     }
     
-    List<BookItem> currentBooks = state is KoreanBooksLoaded ? (state as KoreanBooksLoaded).books : [];
-    final hasMore = state is KoreanBooksLoaded ? (state as KoreanBooksLoaded).hasMore : false;
-    
-    emit(KoreanBooksLoading());
-    
     try {
-      final searchResults = await repository.searchBooks(CourseCategory.korean, query);
-      final uniqueSearchResults = _removeDuplicates(searchResults);
+      emit(state.copyWith(
+        isLoading: true,
+        currentOperation: const KoreanBooksOperation(
+          type: KoreanBooksOperationType.searchBooks,
+          status: KoreanBooksOperationStatus.inProgress,
+        ),
+      ));
       
-      emit(KoreanBooksLoaded(uniqueSearchResults, false));
+      final result = await repository.searchBooks(CourseCategory.korean, query);
+      
+      result.fold(
+        onSuccess: (searchResults) {
+          final uniqueSearchResults = _removeDuplicates(searchResults);
+          
+          final newState = state.copyWith(
+            books: uniqueSearchResults,
+            hasMore: false,
+            isLoading: false,
+            currentOperation: const KoreanBooksOperation(
+              type: KoreanBooksOperationType.searchBooks,
+              status: KoreanBooksOperationStatus.completed,
+            ),
+          );
+          
+          emit(newState);
+          _clearOperationAfterDelay();
+        },
+        onFailure: (message, type) {
+          if (_cachedState != null && _cachedState!.books.isNotEmpty) {
+            emit(_cachedState!.copyWithBaseState(error: message, errorType: type));
+            Future.delayed(const Duration(milliseconds: 100), () {
+              emit(_cachedState!);
+            });
+          } else {
+            emit(state.copyWithBaseState(
+              error: message,
+              errorType: type,
+              isLoading: false,
+            ).copyWithOperation(const KoreanBooksOperation(
+              type: KoreanBooksOperationType.searchBooks,
+              status: KoreanBooksOperationStatus.failed,
+            )));
+          }
+        },
+      );
     } catch (e) {
-      if (currentBooks.isNotEmpty) {
-        emit(KoreanBooksLoaded(currentBooks, hasMore));
-      } else {
-        emit(KoreanBooksError('Failed to search books: $e'));
-      }
+      dev.log('Error searching books: $e');
+      _handleError('Failed to search books: $e', KoreanBooksOperationType.searchBooks);
     }
   }
   
@@ -155,119 +305,152 @@ class KoreanBooksCubit extends Cubit<KoreanBooksState> {
       return;
     }
     
-    final currentState = state;
-    if (currentState is! KoreanBooksLoaded && 
-        currentState is! KoreanBooksLoadingMore && 
-        currentState is! KoreanBookPdfLoaded && 
-        currentState is! KoreanBookPdfError) {
-      return;
-    }
-    
-    List<BookItem> books = [];
-    bool hasMore = false;
-    
-    if (currentState is KoreanBooksLoaded) {
-      books = currentState.books;
-      hasMore = currentState.hasMore;
-    } else if (currentState is KoreanBooksLoadingMore) {
-      books = currentState.currentBooks;
-      hasMore = true;
-    } else if (currentState is KoreanBookPdfLoaded) {
-      books = currentState.books;
-      hasMore = currentState.hasMore;
-    } else if (currentState is KoreanBookPdfError) {
-      books = currentState.books;
-      hasMore = currentState.hasMore;
-    }
-    
-    final bookIndex = books.indexWhere((book) => book.id == bookId);
-    if (bookIndex == -1) {
-      emit(KoreanBookPdfError(bookId, 'Book not found', books, hasMore));
-      return;
-    }
-    
-    _downloadsInProgress.add(bookId);
-    
     try {
-      emit(KoreanBookPdfLoading(bookId, books, hasMore));
+      _downloadsInProgress.add(bookId);
       
-      final pdfFile = await repository.getBookPdf(bookId);
+      emit(state.copyWith(
+        currentOperation: KoreanBooksOperation(
+          type: KoreanBooksOperationType.loadPdf,
+          status: KoreanBooksOperationStatus.inProgress,
+          bookId: bookId,
+        ),
+      ));
       
-      if (pdfFile != null && await pdfFile.exists() && await pdfFile.length() > 0) {
-        emit(KoreanBookPdfLoaded(bookId, pdfFile, books, hasMore));
-      } else {
-        emit(KoreanBookPdfError(bookId, 'PDF file is empty or corrupted', books, hasMore));
-      }
+      final result = await repository.getBookPdf(bookId);
+      
+      result.fold(
+        onSuccess: (pdfFile) {
+          if (pdfFile != null) {
+            emit(state.copyWith(
+              loadedPdfFile: pdfFile,
+              loadedPdfBookId: bookId,
+              currentOperation: KoreanBooksOperation(
+                type: KoreanBooksOperationType.loadPdf,
+                status: KoreanBooksOperationStatus.completed,
+                bookId: bookId,
+              ),
+            ));
+          } else {
+            emit(state.copyWith(
+              currentOperation: KoreanBooksOperation(
+                type: KoreanBooksOperationType.loadPdf,
+                status: KoreanBooksOperationStatus.failed,
+                bookId: bookId,
+                message: 'PDF file is empty or corrupted',
+              ),
+            ));
+          }
+          _clearOperationAfterDelay();
+        },
+        onFailure: (message, type) {
+          emit(state.copyWith(
+            currentOperation: KoreanBooksOperation(
+              type: KoreanBooksOperationType.loadPdf,
+              status: KoreanBooksOperationStatus.failed,
+              bookId: bookId,
+              message: message,
+            ),
+          ));
+          _clearOperationAfterDelay();
+        },
+      );
     } catch (e) {
-      emit(KoreanBookPdfError(bookId, 'Failed to load PDF: $e', books, hasMore));
+      dev.log('Error loading PDF: $e');
+      emit(state.copyWith(
+        currentOperation: KoreanBooksOperation(
+          type: KoreanBooksOperationType.loadPdf,
+          status: KoreanBooksOperationStatus.failed,
+          bookId: bookId,
+          message: 'Failed to load PDF: $e',
+        ),
+      ));
+      _clearOperationAfterDelay();
     } finally {
       _downloadsInProgress.remove(bookId);
     }
   }
   
   Future<void> addBookToState(BookItem book) async {
-    if (state is KoreanBooksLoaded) {
-      final currentState = state as KoreanBooksLoaded;
-      final updatedBooks = [book, ...currentState.books];
-      final hasMore = await repository.hasMoreBooks(CourseCategory.korean, updatedBooks.length);
-      emit(KoreanBooksLoaded(updatedBooks, hasMore));
+    try {
+      final hasMoreResult = await repository.hasMoreBooks(CourseCategory.korean, state.books.length + 1);
+      
+      final newState = state.copyWith(
+        books: [book, ...state.books],
+        hasMore: hasMoreResult.fold(
+          onSuccess: (hasMore) => hasMore,
+          onFailure: (_, __) => state.hasMore,
+        ),
+      );
+      
+      _cachedState = newState;
+      emit(newState);
+    } catch (e) {
+      dev.log('Error adding book to state: $e');
     }
   }
   
   Future<void> updateBookInState(BookItem updatedBook) async {
-    if (state is KoreanBooksLoaded) {
-      final currentState = state as KoreanBooksLoaded;
-      final bookIndex = currentState.books.indexWhere((b) => b.id == updatedBook.id);
+    try {
+      final bookIndex = state.books.indexWhere((b) => b.id == updatedBook.id);
       
       if (bookIndex != -1) {
-        final updatedBooks = List<BookItem>.from(currentState.books);
+        final updatedBooks = List<BookItem>.from(state.books);
         updatedBooks[bookIndex] = updatedBook;
-        emit(KoreanBooksLoaded(updatedBooks, currentState.hasMore));
+        
+        final newState = state.copyWith(books: updatedBooks);
+        _cachedState = newState;
+        emit(newState);
       }
+    } catch (e) {
+      dev.log('Error updating book in state: $e');
     }
   }
 
   Future<void> removeBookFromState(String bookId) async {
-    if (state is KoreanBooksLoaded) {
-      final currentState = state as KoreanBooksLoaded;
-      final updatedBooks = currentState.books.where((b) => b.id != bookId).toList();
-      emit(KoreanBooksLoaded(updatedBooks, currentState.hasMore));
+    try {
+      final updatedBooks = state.books.where((b) => b.id != bookId).toList();
+      
+      final newState = state.copyWith(books: updatedBooks);
+      _cachedState = newState;
+      emit(newState);
+    } catch (e) {
+      dev.log('Error removing book from state: $e');
     }
   }
   
   Future<bool> canUserEditBook(String bookId) async {
-    final UserEntity? user = _getCurrentUser();
-    if (user == null) {
+    try {
+      final UserEntity? user = _getCurrentUser();
+      if (user == null) {
+        return false;
+      }
+      
+      if (await adminService.isUserAdmin(user.uid)) {
+        return true;
+      }
+      
+      final book = state.books.firstWhere(
+        (b) => b.id == bookId,
+        orElse: () => const BookItem(
+          id: '', title: '', description: '', 
+          duration: '', chaptersCount: 0, icon: Icons.book,
+          level: BookLevel.beginner, courseCategory: CourseCategory.korean,
+          country: '', category: ''
+        )
+      );
+      
+      if (book.id.isNotEmpty && book.creatorUid == user.uid) {
+        return true;
+      }
+      
+      return false;
+    } catch (e) {
+      dev.log('Error checking edit permission: $e');
       return false;
     }
-    
-    // Check if user is admin
-    if (await adminService.isUserAdmin(user.uid)) {
-      return true;
-    }
-    
-    final List<BookItem> books = _getBooksFromCurrentState();
-    
-    //Check if use is book creator
-    final book = books.firstWhere(
-      (b) => b.id == bookId,
-      orElse: () => const BookItem(
-        id: '', title: '', description: '', 
-        duration: '', chaptersCount: 0, icon: Icons.book,
-        level: BookLevel.beginner, courseCategory: CourseCategory.korean,
-        country: '', category: ''
-      )
-    );
-    
-    if (book.id.isNotEmpty && book.creatorUid == user.uid) {
-      return true;
-    }
-    
-    return false;
   }
   
   Future<bool> canUserDeleteBook(String bookId) async {
-    // same permission check as edit
     return canUserEditBook(bookId);
   }
   
@@ -277,43 +460,29 @@ class KoreanBooksCubit extends Cubit<KoreanBooksState> {
     }
     
     try {
-      final currentState = state;
-      List<BookItem> currentBooks = [];
-      bool hasMore = false;
+      final result = await repository.regenerateImageUrl(book);
       
-      if (currentState is KoreanBooksLoaded) {
-        currentBooks = currentState.books;
-        hasMore = currentState.hasMore;
-      } else if (currentState is KoreanBookPdfLoaded) {
-        currentBooks = currentState.books;
-        hasMore = currentState.hasMore;
-      } else {
-        return;
-      }
-      
-      final newImageUrl = await repository.regenerateImageUrl(book);
-      
-      if (newImageUrl != null) {
-        final bookIndex = currentBooks.indexWhere((b) => b.id == book.id);
-        if (bookIndex == -1) return;
-        
-        final updatedBook = book.copyWith(bookImage: newImageUrl);
-        final updatedBooks = List<BookItem>.from(currentBooks);
-        updatedBooks[bookIndex] = updatedBook;
+      result.fold(
+        onSuccess: (newImageUrl) {
+          if (newImageUrl != null) {
+            final bookIndex = state.books.indexWhere((b) => b.id == book.id);
+            if (bookIndex == -1) return;
+            
+            final updatedBook = book.copyWith(bookImage: newImageUrl);
+            final updatedBooks = List<BookItem>.from(state.books);
+            updatedBooks[bookIndex] = updatedBook;
 
-        if (currentState is KoreanBooksLoaded) {
-          emit(KoreanBooksLoaded(updatedBooks, hasMore));
-        } else if (currentState is KoreanBookPdfLoaded) {
-          emit(KoreanBookPdfLoaded(
-            currentState.bookId, 
-            currentState.pdfFile, 
-            updatedBooks, 
-            hasMore
-          ));
-        }
-      }
+            final newState = state.copyWith(books: updatedBooks);
+            _cachedState = newState;
+            emit(newState);
+          }
+        },
+        onFailure: (message, type) {
+          dev.log('Failed to regenerate book image URL: $message');
+        },
+      );
     } catch (e) {
-      dev.log('Failed to regenerate book image URL: $e');
+      dev.log('Error regenerating book image URL: $e');
     }
   }
   
@@ -338,23 +507,35 @@ class KoreanBooksCubit extends Cubit<KoreanBooksState> {
     return uniqueBooks;
   }
 
-  // Helper method to get books from any state that contains books
-  List<BookItem> _getBooksFromCurrentState() {
-    final currentState = state;
-    
-    if (currentState is KoreanBooksLoaded) {
-      return currentState.books;
-    } else if (currentState is KoreanBooksLoadingMore) {
-      return currentState.currentBooks;
-    } else if (currentState is KoreanBookPdfLoading) {
-      return currentState.books;
-    } else if (currentState is KoreanBookPdfLoaded) {
-      return currentState.books;
-    } else if (currentState is KoreanBookPdfError) {
-      return currentState.books;
+  void _handleError(String message, KoreanBooksOperationType operationType) {
+    if (_cachedState != null && _cachedState!.books.isNotEmpty) {
+      emit(_cachedState!.copyWithBaseState(error: message));
+      Future.delayed(const Duration(milliseconds: 100), () {
+        emit(_cachedState!.copyWithOperation(KoreanBooksOperation(
+          type: operationType,
+          status: KoreanBooksOperationStatus.failed,
+          message: message,
+        )));
+      });
+    } else {
+      emit(state.copyWithBaseState(
+        error: message,
+        isLoading: false,
+      ).copyWithOperation(KoreanBooksOperation(
+        type: operationType,
+        status: KoreanBooksOperationStatus.failed,
+        message: message,
+      )));
     }
     
-    return [];
+    _clearOperationAfterDelay();
   }
 
+  void _clearOperationAfterDelay() {
+    Future.delayed(const Duration(seconds: 3), () {
+      if (state.currentOperation.status != KoreanBooksOperationStatus.none) {
+        emit(state.copyWithOperation(const KoreanBooksOperation(status: KoreanBooksOperationStatus.none)));
+      }
+    });
+  }
 }

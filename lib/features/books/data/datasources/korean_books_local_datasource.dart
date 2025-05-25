@@ -1,17 +1,17 @@
 import 'dart:io';
-
+import 'package:korean_language_app/core/errors/api_result.dart';
 import 'package:korean_language_app/features/books/data/models/book_item.dart';
 
 abstract class KoreanBooksLocalDataSource {
-  Future<List<BookItem>> getCachedKoreanBooks();
-  Future<void> cacheKoreanBooks(List<BookItem> books);
-  Future<bool> hasAnyCachedBooks();
-  Future<int> getCachedBooksCount();
-  Future<void> clearCachedKoreanBooks();
+  Future<ApiResult<List<BookItem>>> getCachedKoreanBooks();
+  Future<ApiResult<void>> cacheKoreanBooks(List<BookItem> books);
+  Future<ApiResult<bool>> hasAnyCachedBooks();
+  Future<ApiResult<int>> getCachedBooksCount();
+  Future<ApiResult<void>> clearCachedKoreanBooks();
   
-  Future<File?> getCachedPdfFile(String bookId);
-  Future<void> cachePdfFile(String bookId, File pdfFile);
-  Future<bool> hasCachedPdf(String bookId);
-  Future<void> clearCachedPdf(String bookId);
-  Future<void> updateBookMetadata(BookItem book);
+  Future<ApiResult<File?>> getCachedPdfFile(String bookId);
+  Future<ApiResult<void>> cachePdfFile(String bookId, File pdfFile);
+  Future<ApiResult<bool>> hasCachedPdf(String bookId);
+  Future<ApiResult<void>> clearCachedPdf(String bookId);
+  Future<ApiResult<void>> updateBookMetadata(BookItem book);
 }

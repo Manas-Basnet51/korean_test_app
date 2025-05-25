@@ -10,12 +10,12 @@ class ErrorView extends StatelessWidget {
   final bool isCompact;
 
   const ErrorView({
-    Key? key,
+    super.key,
     required this.message,
     this.errorType,
     required this.onRetry,
     this.isCompact = false,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

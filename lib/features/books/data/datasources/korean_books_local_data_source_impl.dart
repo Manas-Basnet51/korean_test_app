@@ -1,12 +1,14 @@
 import 'dart:convert';
 import 'dart:developer' as dev;
 import 'dart:io';
+import 'package:korean_language_app/core/data/base_datasource.dart';
+import 'package:korean_language_app/core/errors/api_result.dart';
 import 'package:korean_language_app/features/books/data/datasources/korean_books_local_datasource.dart';
 import 'package:korean_language_app/features/books/data/models/book_item.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-class KoreanBooksLocalDataSourceImpl implements KoreanBooksLocalDataSource {
+class KoreanBooksLocalDataSourceImpl extends BaseDataSource implements KoreanBooksLocalDataSource {
   final SharedPreferences sharedPreferences;
   static const String cacheKey = 'CACHED_KOREAN_BOOKS';
   static const String lastCacheTimeKey = 'LAST_KOREAN_BOOKS_CACHE_TIME';
@@ -14,8 +16,8 @@ class KoreanBooksLocalDataSourceImpl implements KoreanBooksLocalDataSource {
   KoreanBooksLocalDataSourceImpl({required this.sharedPreferences});
 
   @override
-  Future<List<BookItem>> getCachedKoreanBooks() async {
-    try {
+  Future<ApiResult<List<BookItem>>> getCachedKoreanBooks() {
+    return handleAsyncDataSourceCall(() async {
       final jsonString = sharedPreferences.getString(cacheKey);
       if (jsonString != null) {
         final List<dynamic> decodedJson = json.decode(jsonString);
@@ -23,32 +25,32 @@ class KoreanBooksLocalDataSourceImpl implements KoreanBooksLocalDataSource {
             .map((item) => BookItem.fromJson(item))
             .toList();
       }
-    } catch (e) {
-      dev.log('Error decoding cached books: $e');
-    }
-    return [];
+      return <BookItem>[];
+    });
   }
 
   @override
-  Future<void> cacheKoreanBooks(List<BookItem> books) async {
-    if (books.isEmpty) {
-      return;
-    }
-    
-    try {
-      final existingBooks = await getCachedKoreanBooks();
+  Future<ApiResult<void>> cacheKoreanBooks(List<BookItem> books) {
+    return handleAsyncDataSourceCall(() async {
+      if (books.isEmpty) {
+        return;
+      }
       
-      // Create a map for O(1) lookups
+      final existingBooksResult = await getCachedKoreanBooks();
+      if (!existingBooksResult.isSuccess) {
+        throw Exception('Failed to get existing cached books');
+      }
+      
+      final existingBooks = existingBooksResult.data!;
+      
       final Map<String, BookItem> uniqueBooks = {
         for (var book in existingBooks) book.id: book
       };
       
-      // Add or update new books
       for (final book in books) {
         uniqueBooks[book.id] = book;
       }
       
-      // Convert map values back to list
       final updatedBooks = uniqueBooks.values.toList();
       
       final List<Map<String, dynamic>> jsonList = 
@@ -57,33 +59,44 @@ class KoreanBooksLocalDataSourceImpl implements KoreanBooksLocalDataSource {
       final String jsonString = json.encode(jsonList);
       await sharedPreferences.setString(cacheKey, jsonString);
       await sharedPreferences.setInt(lastCacheTimeKey, DateTime.now().millisecondsSinceEpoch);
-      
-    } catch (e) {
-      dev.log('Error caching books: $e');
-    }
+    });
   }
 
   @override
-  Future<bool> hasAnyCachedBooks() async {
-    return sharedPreferences.containsKey(cacheKey);
+  Future<ApiResult<bool>> hasAnyCachedBooks() {
+    return handleDataSourceCall(() {
+      return sharedPreferences.containsKey(cacheKey);
+    });
   }
 
   @override
-  Future<int> getCachedBooksCount() async {
-    final books = await getCachedKoreanBooks();
-    return books.length;
+  Future<ApiResult<int>> getCachedBooksCount() {
+    return handleAsyncDataSourceCall(() async {
+      final booksResult = await getCachedKoreanBooks();
+      if (!booksResult.isSuccess) {
+        throw Exception('Failed to get cached books count');
+      }
+      return booksResult.data!.length;
+    });
   }
 
   @override
-  Future<void> clearCachedKoreanBooks() async {
-    await sharedPreferences.remove(cacheKey);
-    await sharedPreferences.remove(lastCacheTimeKey);
+  Future<ApiResult<void>> clearCachedKoreanBooks() {
+    return handleAsyncDataSourceCall(() async {
+      await sharedPreferences.remove(cacheKey);
+      await sharedPreferences.remove(lastCacheTimeKey);
+    });
   }
   
   @override
-  Future<void> updateBookMetadata(BookItem book) async {
-    try {
-      final existingBooks = await getCachedKoreanBooks();
+  Future<ApiResult<void>> updateBookMetadata(BookItem book) {
+    return handleAsyncDataSourceCall(() async {
+      final existingBooksResult = await getCachedKoreanBooks();
+      if (!existingBooksResult.isSuccess) {
+        throw Exception('Failed to get existing cached books');
+      }
+      
+      final existingBooks = existingBooksResult.data!;
       
       final index = existingBooks.indexWhere((b) => b.id == book.id);
       if (index != -1) {
@@ -95,17 +108,17 @@ class KoreanBooksLocalDataSourceImpl implements KoreanBooksLocalDataSource {
         final String jsonString = json.encode(jsonList);
         await sharedPreferences.setString(cacheKey, jsonString);
       } else {
-        // If book wasn't found, add it to cache
-        await cacheKoreanBooks([book]);
+        final cacheResult = await cacheKoreanBooks([book]);
+        if (!cacheResult.isSuccess) {
+          throw Exception('Failed to cache book');
+        }
       }
-    } catch (e) {
-      dev.log('Error updating book metadata in cache: $e');
-    }
+    });
   }
   
   @override
-  Future<File?> getCachedPdfFile(String bookId) async {
-    try {
+  Future<ApiResult<File?>> getCachedPdfFile(String bookId) {
+    return handleAsyncDataSourceCall(() async {
       final directory = await getApplicationDocumentsDirectory();
       final file = File('${directory.path}/pdf_cache/$bookId.pdf');
       
@@ -114,76 +127,68 @@ class KoreanBooksLocalDataSourceImpl implements KoreanBooksLocalDataSource {
         if (fileSize > 0) {
           return file;
         } else {
-          // Delete invalid empty file
           await file.delete();
         }
       }
       return null;
-    } catch (e) {
-      dev.log('Error getting cached PDF: $e');
-      return null;
-    }
+    });
   }
   
   @override
-  Future<void> cachePdfFile(String bookId, File pdfFile) async {
-    try {
+  Future<ApiResult<void>> cachePdfFile(String bookId, File pdfFile) {
+    return handleAsyncDataSourceCall(() async {
       final directory = await getApplicationDocumentsDirectory();
       final cacheDir = Directory('${directory.path}/pdf_cache');
       
-      // Create directory if it doesn't exist
       if (!await cacheDir.exists()) {
         await cacheDir.create(recursive: true);
       }
       
       final cacheFile = File('${cacheDir.path}/$bookId.pdf');
       
-      // If file already exists, delete it first
       if (await cacheFile.exists()) {
         await cacheFile.delete();
       }
       
-      // Copy the file to cache
       await pdfFile.copy(cacheFile.path);
       
-      // Verify the file was copied successfully
       if (await cacheFile.exists() && await cacheFile.length() > 0) {
-        // Store the timestamp of when this PDF was cached
         final pdfCacheKey = 'PDF_CACHE_TIME_$bookId';
         final now = DateTime.now().millisecondsSinceEpoch;
         await sharedPreferences.setInt(pdfCacheKey, now);
       } else {
         dev.log('Failed to cache PDF file properly');
+        throw Exception('Failed to cache PDF file properly');
       }
-    } catch (e) {
-      dev.log('Error caching PDF file: $e');
-    }
+    });
   }
   
   @override
-  Future<bool> hasCachedPdf(String bookId) async {
-    try {
-      final file = await getCachedPdfFile(bookId);
-      return file != null && await file.exists() && await file.length() > 0;
-    } catch (e) {
-      dev.log('Error checking for cached PDF: $e');
-      return false;
-    }
-  }
-  
-  @override
-  Future<void> clearCachedPdf(String bookId) async {
-    try {
-      final file = await getCachedPdfFile(bookId);
-      if (file != null && await file.exists()) {
-        await file.delete();
+  Future<ApiResult<bool>> hasCachedPdf(String bookId) {
+    return handleAsyncDataSourceCall(() async {
+      final fileResult = await getCachedPdfFile(bookId);
+      if (!fileResult.isSuccess) {
+        return false;
       }
       
-      // Clear the timestamp
+      final file = fileResult.data;
+      return file != null && await file.exists() && await file.length() > 0;
+    });
+  }
+  
+  @override
+  Future<ApiResult<void>> clearCachedPdf(String bookId) {
+    return handleAsyncDataSourceCall(() async {
+      final fileResult = await getCachedPdfFile(bookId);
+      if (fileResult.isSuccess && fileResult.data != null) {
+        final file = fileResult.data!;
+        if (await file.exists()) {
+          await file.delete();
+        }
+      }
+      
       final pdfCacheKey = 'PDF_CACHE_TIME_$bookId';
       await sharedPreferences.remove(pdfCacheKey);
-    } catch (e) {
-      dev.log('Error clearing cached PDF: $e');
-    }
+    });
   }
 }
