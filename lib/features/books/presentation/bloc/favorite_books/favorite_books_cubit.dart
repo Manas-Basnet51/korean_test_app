@@ -1,4 +1,4 @@
-import 'dart:developer';
+import 'dart:developer' as dev;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:korean_language_app/core/data/base_state.dart';
 import 'package:korean_language_app/core/enums/course_category.dart';
@@ -11,27 +11,30 @@ part 'favorite_books_state.dart';
 class FavoriteBooksCubit extends Cubit<FavoriteBooksState> {
   final FavoriteBookRepository repository;
   
-  // Cache for state
-  FavoriteBooksState? _cachedState;
-  
-  FavoriteBooksState? get cachedState => _cachedState;
+  // Performance monitoring
+  final Stopwatch _operationStopwatch = Stopwatch();
   
   FavoriteBooksCubit(this.repository) : super(const FavoriteBooksInitial());
   
   Future<void> loadInitialBooks() async {
-    log('loadFavInitialBooks');
+    if (state.currentOperation.isInProgress) {
+      dev.log('Favorite books load operation already in progress, skipping...');
+      return;
+    }
+    
+    _operationStopwatch.reset();
+    _operationStopwatch.start();
     
     try {
-      // Only show loading if we don't have cached data
-      if (_cachedState == null || _cachedState!.books.isEmpty) {
-        emit(state.copyWith(
-          isLoading: true,
-          currentOperation: const FavoriteBooksOperation(
-            type: FavoriteBooksOperationType.loadBooks,
-            status: FavoriteBooksOperationStatus.inProgress,
-          ),
-        ));
-      }
+      emit(state.copyWith(
+        isLoading: true,
+        error: null,
+        errorType: null,
+        currentOperation: const FavoriteBooksOperation(
+          type: FavoriteBooksOperationType.loadBooks,
+          status: FavoriteBooksOperationStatus.inProgress,
+        ),
+      ));
       
       final result = await repository.getBooksFromCache();
       
@@ -41,7 +44,10 @@ class FavoriteBooksCubit extends Cubit<FavoriteBooksState> {
           
           final hasMoreResult = await repository.hasMoreBooks(CourseCategory.favorite, uniqueBooks.length);
           
-          final newState = FavoriteBooksState(
+          _operationStopwatch.stop();
+          dev.log('loadFavoriteBooks completed in ${_operationStopwatch.elapsedMilliseconds}ms with ${uniqueBooks.length} books');
+          
+          emit(FavoriteBooksState(
             books: uniqueBooks,
             hasMore: hasMoreResult.fold(
               onSuccess: (hasMore) => hasMore,
@@ -51,43 +57,46 @@ class FavoriteBooksCubit extends Cubit<FavoriteBooksState> {
               type: FavoriteBooksOperationType.loadBooks,
               status: FavoriteBooksOperationStatus.completed,
             ),
-          );
-          
-          _cachedState = newState;
-          emit(newState);
+          ));
           
           _clearOperationAfterDelay();
         },
         onFailure: (message, type) {
-          if (_cachedState != null && _cachedState!.books.isNotEmpty) {
-            emit(_cachedState!.copyWithBaseState(error: message, errorType: type));
-            Future.delayed(const Duration(milliseconds: 100), () {
-              emit(_cachedState!);
-            });
-          } else {
-            emit(state.copyWithBaseState(
-              error: message,
-              errorType: type,
-              isLoading: false,
-            ).copyWithOperation(const FavoriteBooksOperation(
-              type: FavoriteBooksOperationType.loadBooks,
-              status: FavoriteBooksOperationStatus.failed,
-            )));
-          }
+          _operationStopwatch.stop();
+          dev.log('loadFavoriteBooks failed after ${_operationStopwatch.elapsedMilliseconds}ms: $message');
+          
+          emit(state.copyWithBaseState(
+            error: message,
+            errorType: type,
+            isLoading: false,
+          ).copyWithOperation(const FavoriteBooksOperation(
+            type: FavoriteBooksOperationType.loadBooks,
+            status: FavoriteBooksOperationStatus.failed,
+          )));
+          _clearOperationAfterDelay();
         },
       );
     } catch (e) {
-      log('Error loading favorite books: $e');
-      _handleError('Failed to load Favorite books: $e', FavoriteBooksOperationType.loadBooks);
+      _operationStopwatch.stop();
+      dev.log('Error loading favorite books after ${_operationStopwatch.elapsedMilliseconds}ms: $e');
+      _handleError('Failed to load favorite books: $e', FavoriteBooksOperationType.loadBooks);
     }
   }
   
   Future<void> hardRefresh() async {
-    log('hardRefreshFav');
+    if (state.currentOperation.isInProgress) {
+      dev.log('Favorite books refresh operation already in progress, skipping...');
+      return;
+    }
+    
+    _operationStopwatch.reset();
+    _operationStopwatch.start();
     
     try {
       emit(state.copyWith(
         isLoading: true,
+        error: null,
+        errorType: null,
         currentOperation: const FavoriteBooksOperation(
           type: FavoriteBooksOperationType.refreshBooks,
           status: FavoriteBooksOperationStatus.inProgress,
@@ -102,7 +111,10 @@ class FavoriteBooksCubit extends Cubit<FavoriteBooksState> {
           
           final hasMoreResult = await repository.hasMoreBooks(CourseCategory.favorite, uniqueBooks.length);
           
-          final newState = FavoriteBooksState(
+          _operationStopwatch.stop();
+          dev.log('refreshFavoriteBooks completed in ${_operationStopwatch.elapsedMilliseconds}ms with ${uniqueBooks.length} books');
+          
+          emit(FavoriteBooksState(
             books: uniqueBooks,
             hasMore: hasMoreResult.fold(
               onSuccess: (hasMore) => hasMore,
@@ -112,38 +124,41 @@ class FavoriteBooksCubit extends Cubit<FavoriteBooksState> {
               type: FavoriteBooksOperationType.refreshBooks,
               status: FavoriteBooksOperationStatus.completed,
             ),
-          );
-          
-          _cachedState = newState;
-          emit(newState);
+          ));
           
           _clearOperationAfterDelay();
         },
         onFailure: (message, type) {
-          if (_cachedState != null && _cachedState!.books.isNotEmpty) {
-            emit(_cachedState!.copyWithBaseState(error: message, errorType: type));
-            Future.delayed(const Duration(milliseconds: 100), () {
-              emit(_cachedState!);
-            });
-          } else {
-            emit(state.copyWithBaseState(
-              error: message,
-              errorType: type,
-              isLoading: false,
-            ).copyWithOperation(const FavoriteBooksOperation(
-              type: FavoriteBooksOperationType.refreshBooks,
-              status: FavoriteBooksOperationStatus.failed,
-            )));
-          }
+          _operationStopwatch.stop();
+          dev.log('refreshFavoriteBooks failed after ${_operationStopwatch.elapsedMilliseconds}ms: $message');
+          
+          emit(state.copyWithBaseState(
+            error: message,
+            errorType: type,
+            isLoading: false,
+          ).copyWithOperation(const FavoriteBooksOperation(
+            type: FavoriteBooksOperationType.refreshBooks,
+            status: FavoriteBooksOperationStatus.failed,
+          )));
+          _clearOperationAfterDelay();
         },
       );
     } catch (e) {
-      log('Error refreshing favorite books: $e');
-      _handleError('Failed to refresh Favorite books: $e', FavoriteBooksOperationType.refreshBooks);
+      _operationStopwatch.stop();
+      dev.log('Error refreshing favorite books after ${_operationStopwatch.elapsedMilliseconds}ms: $e');
+      _handleError('Failed to refresh favorite books: $e', FavoriteBooksOperationType.refreshBooks);
     }
   }
   
   Future<void> searchBooks(String query) async {
+    if (state.currentOperation.isInProgress) {
+      dev.log('Favorite books search operation already in progress, skipping...');
+      return;
+    }
+    
+    _operationStopwatch.reset();
+    _operationStopwatch.start();
+    
     try {
       emit(state.copyWith(
         isLoading: true,
@@ -159,44 +174,54 @@ class FavoriteBooksCubit extends Cubit<FavoriteBooksState> {
         onSuccess: (searchResults) {
           final uniqueSearchResults = _removeDuplicates(searchResults);
           
-          final newState = state.copyWith(
+          _operationStopwatch.stop();
+          dev.log('searchFavoriteBooks completed in ${_operationStopwatch.elapsedMilliseconds}ms with ${uniqueSearchResults.length} results for query: "$query"');
+          
+          emit(state.copyWith(
             books: uniqueSearchResults,
             hasMore: false, // No pagination for search results
             isLoading: false,
+            error: null,
+            errorType: null,
             currentOperation: const FavoriteBooksOperation(
               type: FavoriteBooksOperationType.searchBooks,
               status: FavoriteBooksOperationStatus.completed,
             ),
-          );
-          
-          emit(newState);
+          ));
           _clearOperationAfterDelay();
         },
         onFailure: (message, type) {
-          if (_cachedState != null && _cachedState!.books.isNotEmpty) {
-            emit(_cachedState!.copyWithBaseState(error: message, errorType: type));
-            Future.delayed(const Duration(milliseconds: 100), () {
-              emit(_cachedState!);
-            });
-          } else {
-            emit(state.copyWithBaseState(
-              error: message,
-              errorType: type,
-              isLoading: false,
-            ).copyWithOperation(const FavoriteBooksOperation(
-              type: FavoriteBooksOperationType.searchBooks,
-              status: FavoriteBooksOperationStatus.failed,
-            ))); 
-          }
+          _operationStopwatch.stop();
+          dev.log('searchFavoriteBooks failed after ${_operationStopwatch.elapsedMilliseconds}ms: $message');
+          
+          emit(state.copyWithBaseState(
+            error: message,
+            errorType: type,
+            isLoading: false,
+          ).copyWithOperation(const FavoriteBooksOperation(
+            type: FavoriteBooksOperationType.searchBooks,
+            status: FavoriteBooksOperationStatus.failed,
+          ))); 
+          _clearOperationAfterDelay();
         },
       );
     } catch (e) {
-      log('Error searching favorite books: $e');
-      _handleError('Failed to search books: $e', FavoriteBooksOperationType.searchBooks);
+      _operationStopwatch.stop();
+      dev.log('Error searching favorite books after ${_operationStopwatch.elapsedMilliseconds}ms: $e');
+      _handleError('Failed to search favorite books: $e', FavoriteBooksOperationType.searchBooks);
     }
   }
 
   Future<void> toggleFavorite(BookItem bookItem) async {
+    if (state.currentOperation.type == FavoriteBooksOperationType.toggleFavorite && 
+        state.currentOperation.isInProgress) {
+      dev.log('Toggle favorite operation already in progress for book: ${bookItem.id}');
+      return;
+    }
+    
+    _operationStopwatch.reset();
+    _operationStopwatch.start();
+    
     try {
       emit(state.copyWith(
         currentOperation: const FavoriteBooksOperation(
@@ -206,21 +231,20 @@ class FavoriteBooksCubit extends Cubit<FavoriteBooksState> {
       ));
       
       final currentBooks = state.books;
-      final bool isAlreadyFavorite = currentBooks.any((book) => book.id == bookItem.id);
+      final isAlreadyFavorite = currentBooks.any((book) => book.id == bookItem.id);
       
-      ApiResult<List<BookItem>> result;
-      
-      if (isAlreadyFavorite) {
-        result = await repository.removeBookFromFavorite(bookItem);
-      } else {
-        result = await repository.addFavoritedBook(bookItem);
-      }
+      final result = isAlreadyFavorite
+          ? await repository.removeBookFromFavorite(bookItem)
+          : await repository.addFavoritedBook(bookItem);
       
       result.fold(
         onSuccess: (updatedBooks) async {
           final hasMoreResult = await repository.hasMoreBooks(CourseCategory.favorite, updatedBooks.length);
           
-          final newState = state.copyWith(
+          _operationStopwatch.stop();
+          dev.log('toggleFavorite completed in ${_operationStopwatch.elapsedMilliseconds}ms for book: ${bookItem.title} (${isAlreadyFavorite ? 'removed' : 'added'})');
+          
+          emit(state.copyWith(
             books: updatedBooks,
             hasMore: hasMoreResult.fold(
               onSuccess: (hasMore) => hasMore,
@@ -230,14 +254,14 @@ class FavoriteBooksCubit extends Cubit<FavoriteBooksState> {
               type: FavoriteBooksOperationType.toggleFavorite,
               status: FavoriteBooksOperationStatus.completed,
             ),
-          );
-          
-          _cachedState = newState;
-          emit(newState);
+          ));
           
           _clearOperationAfterDelay();
         },
         onFailure: (message, type) {
+          _operationStopwatch.stop();
+          dev.log('toggleFavorite failed after ${_operationStopwatch.elapsedMilliseconds}ms: $message');
+          
           emit(state.copyWithBaseState(error: message, errorType: type));
           
           // Reload the original favorites to recover from error
@@ -247,7 +271,9 @@ class FavoriteBooksCubit extends Cubit<FavoriteBooksState> {
         },
       );
     } catch (e) {
-      log('Error toggling favorite: $e');
+      _operationStopwatch.stop();
+      dev.log('Error toggling favorite after ${_operationStopwatch.elapsedMilliseconds}ms: $e');
+      
       emit(state.copyWithBaseState(error: 'Failed to toggle favorite status: $e'));
       
       // Reload the original favorites to recover from error
@@ -269,25 +295,14 @@ class FavoriteBooksCubit extends Cubit<FavoriteBooksState> {
   }
 
   void _handleError(String message, FavoriteBooksOperationType operationType) {
-    if (_cachedState != null && _cachedState!.books.isNotEmpty) {
-      emit(_cachedState!.copyWithBaseState(error: message));
-      Future.delayed(const Duration(milliseconds: 100), () {
-        emit(_cachedState!.copyWithOperation(FavoriteBooksOperation(
-          type: operationType,
-          status: FavoriteBooksOperationStatus.failed,
-          message: message,
-        )));
-      });
-    } else {
-      emit(state.copyWithBaseState(
-        error: message,
-        isLoading: false,
-      ).copyWithOperation(FavoriteBooksOperation(
-        type: operationType,
-        status: FavoriteBooksOperationStatus.failed,
-        message: message,
-      )));
-    }
+    emit(state.copyWithBaseState(
+      error: message,
+      isLoading: false,
+    ).copyWithOperation(FavoriteBooksOperation(
+      type: operationType,
+      status: FavoriteBooksOperationStatus.failed,
+      message: message,
+    )));
     
     _clearOperationAfterDelay();
   }

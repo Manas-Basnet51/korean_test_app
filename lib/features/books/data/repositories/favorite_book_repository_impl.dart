@@ -1,3 +1,4 @@
+import 'dart:developer' as dev;
 import 'package:korean_language_app/core/data/base_repository.dart';
 import 'package:korean_language_app/core/enums/course_category.dart';
 import 'package:korean_language_app/core/errors/api_result.dart';
@@ -15,63 +16,157 @@ class FavoriteBookRepositoryImpl extends BaseRepository implements FavoriteBookR
   }) : super(networkInfo);
 
   @override
-  Future<ApiResult<void>> clearCachedBooks() {
-    return localDataSource.clearCachedFavoriteBooks();
+  Future<ApiResult<void>> clearCachedBooks() async {
+    try {
+      await localDataSource.clearCachedFavoriteBooks();
+      dev.log('Favorite books cache cleared successfully');
+      return ApiResult.success(null);
+    } catch (e) {
+      dev.log('Failed to clear favorite books cache: $e');
+      return ApiResult.failure('Failed to clear favorite books cache: $e', FailureType.cache);
+    }
   }
 
   @override
   Future<ApiResult<List<BookItem>>> getBooks(CourseCategory category, {int page = 0, int pageSize = 5}) {
+    // Favorites are always local, so just return cached books
     return getBooksFromCache();
   }
 
   @override
-  Future<ApiResult<List<BookItem>>> getBooksFromCache() {
-    return localDataSource.getCachedFavoriteBooks();
+  Future<ApiResult<List<BookItem>>> getBooksFromCache() async {
+    try {
+      final books = await localDataSource.getCachedFavoriteBooks();
+      dev.log('Retrieved ${books.length} favorite books from cache');
+      return ApiResult.success(books);
+    } catch (e) {
+      dev.log('Failed to get favorite books from cache: $e');
+      return ApiResult.failure('Failed to get favorite books from cache: $e', FailureType.cache);
+    }
   }
 
   @override
   Future<ApiResult<List<BookItem>>> hardRefreshBooks(CourseCategory category, {int pageSize = 5}) {
+    // For favorites, hard refresh is the same as getting from cache
+    // since there's no remote source for favorites
     return getBooksFromCache();
   }
 
   @override
   Future<ApiResult<bool>> hasMoreBooks(CourseCategory category, int currentCount) async {
-    final totalCachedCountResult = await localDataSource.getCachedBooksCount();
-    return totalCachedCountResult.fold(
-      onSuccess: (totalCount) => ApiResult.success(currentCount < totalCount),
-      onFailure: (message, type) => ApiResult.failure(message, type),
-    );
+    try {
+      final totalCount = await localDataSource.getCachedBooksCount();
+      final hasMore = currentCount < totalCount;
+      dev.log('Favorite books hasMore check: $currentCount < $totalCount = $hasMore');
+      return ApiResult.success(hasMore);
+    } catch (e) {
+      dev.log('Failed to check if more favorite books exist: $e');
+      return ApiResult.success(false);
+    }
   }
 
   @override
   Future<ApiResult<List<BookItem>>> searchBooks(CourseCategory category, String query) async {
-    return _searchInCache(query);
+    try {
+      final allBooks = await localDataSource.getCachedFavoriteBooks();
+      final normalizedQuery = query.toLowerCase().trim();
+      
+      if (normalizedQuery.isEmpty) {
+        return ApiResult.success(allBooks);
+      }
+      
+      final results = allBooks.where((book) {
+        return book.title.toLowerCase().contains(normalizedQuery) ||
+               book.description.toLowerCase().contains(normalizedQuery) ||
+               book.category.toLowerCase().contains(normalizedQuery);
+      }).toList();
+      
+      dev.log('Favorite books search for "$query" returned ${results.length} results');
+      return ApiResult.success(results);
+    } catch (e) {
+      dev.log('Failed to search favorite books: $e');
+      return ApiResult.failure('Failed to search favorite books: $e', FailureType.cache);
+    }
   }
   
   @override
-  Future<ApiResult<List<BookItem>>> addFavoritedBook(BookItem bookItem) {
-    return localDataSource.addFavoritedBook(bookItem);
+  Future<ApiResult<List<BookItem>>> addFavoritedBook(BookItem bookItem) async {
+    try {
+      final updatedBooks = await localDataSource.addFavoritedBook(bookItem);
+      dev.log('Added book to favorites: ${bookItem.title} (${bookItem.id})');
+      return ApiResult.success(updatedBooks);
+    } catch (e) {
+      dev.log('Failed to add book to favorites: $e');
+      return ApiResult.failure('Failed to add book to favorites: $e', FailureType.cache);
+    }
   }
 
   @override
-  Future<ApiResult<List<BookItem>>> removeBookFromFavorite(BookItem bookItem) {
-    return localDataSource.removeBookFromCache(bookItem.id);
+  Future<ApiResult<List<BookItem>>> removeBookFromFavorite(BookItem bookItem) async {
+    try {
+      final updatedBooks = await localDataSource.removeBookFromCache(bookItem.id);
+      dev.log('Removed book from favorites: ${bookItem.title} (${bookItem.id})');
+      return ApiResult.success(updatedBooks);
+    } catch (e) {
+      dev.log('Failed to remove book from favorites: $e');
+      return ApiResult.failure('Failed to remove book from favorites: $e', FailureType.cache);
+    }
   }
 
-  Future<ApiResult<List<BookItem>>> _searchInCache(String query) async {
-    final allCachedBooksResult = await getBooksFromCache();
-    if (!allCachedBooksResult.isSuccess) {
-      return allCachedBooksResult;
+  // Additional helper methods for favorite-specific operations
+  
+  Future<ApiResult<bool>> isBookFavorited(String bookId) async {
+    try {
+      final favoriteBooks = await localDataSource.getCachedFavoriteBooks();
+      final isFavorited = favoriteBooks.any((book) => book.id == bookId);
+      return ApiResult.success(isFavorited);
+    } catch (e) {
+      dev.log('Failed to check if book is favorited: $e');
+      return ApiResult.success(false);
     }
-    
-    final allCachedBooks = allCachedBooksResult.data!;
-    final normalizedQuery = query.toLowerCase();
-    
-    final results = allCachedBooks.where((book) {
-      return book.title.toLowerCase().contains(normalizedQuery) ||
-            book.description.toLowerCase().contains(normalizedQuery);
-    }).toList();
-    
-    return ApiResult.success(results);
+  }
+
+  Future<ApiResult<int>> getFavoriteBooksCount() async {
+    try {
+      final count = await localDataSource.getCachedBooksCount();
+      return ApiResult.success(count);
+    } catch (e) {
+      dev.log('Failed to get favorite books count: $e');
+      return ApiResult.success(0);
+    }
+  }
+
+  Future<ApiResult<List<BookItem>>> getFavoriteBooksByCategory(String category) async {
+    try {
+      final allFavorites = await localDataSource.getCachedFavoriteBooks();
+      final filteredBooks = allFavorites.where((book) => 
+        book.category.toLowerCase() == category.toLowerCase()
+      ).toList();
+      
+      return ApiResult.success(filteredBooks);
+    } catch (e) {
+      dev.log('Failed to get favorite books by category: $e');
+      return ApiResult.failure('Failed to get favorite books by category: $e', FailureType.cache);
+    }
+  }
+
+  Future<ApiResult<List<BookItem>>> getRecentlyFavoritedBooks({int limit = 5}) async {
+    try {
+      final allFavorites = await localDataSource.getCachedFavoriteBooks();
+      
+      // Sort by creation date if available, otherwise by title
+      allFavorites.sort((a, b) {
+        if (a.createdAt != null && b.createdAt != null) {
+          return b.createdAt!.compareTo(a.createdAt!);
+        }
+        return a.title.compareTo(b.title);
+      });
+      
+      final recentBooks = allFavorites.take(limit).toList();
+      return ApiResult.success(recentBooks);
+    } catch (e) {
+      dev.log('Failed to get recently favorited books: $e');
+      return ApiResult.failure('Failed to get recently favorited books: $e', FailureType.cache);
+    }
   }
 }

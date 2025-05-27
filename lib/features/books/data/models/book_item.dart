@@ -82,6 +82,16 @@ class BookItem {
     );
   }
 
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    
+    return other is BookItem && other.id == id;
+  }
+
+  @override
+  int get hashCode => id.hashCode;
+
   factory BookItem.fromJson(Map<String, dynamic> json) {
     // Handle level conversion
     BookLevel level;
@@ -133,7 +143,6 @@ class BookItem {
       } else if (json['createdAt'] is Map) {
         // Handle Firestore Timestamp
         final seconds = json['createdAt']['_seconds'] as int?;
-        // final nanoseconds = json['createdAt']['_nanoseconds'] as int?; // Ai code , what to do??
         if (seconds != null) {
           createdAt = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
         }
@@ -147,7 +156,6 @@ class BookItem {
       } else if (json['updatedAt'] is Map) {
         // Handle Firestore Timestamp
         final seconds = json['updatedAt']['_seconds'] as int?;
-        // final nanoseconds = json['updatedAt']['_nanoseconds'] as int?; // Ai code , what to do??
         if (seconds != null) {
           updatedAt = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
         }

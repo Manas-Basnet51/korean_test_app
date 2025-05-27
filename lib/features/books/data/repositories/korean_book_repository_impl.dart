@@ -13,6 +13,10 @@ import 'package:path_provider/path_provider.dart';
 class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepository {
   final KoreanBooksRemoteDataSource remoteDataSource;
   final KoreanBooksLocalDataSource localDataSource;
+  
+  // Retry configuration
+  static const int maxRetries = 3;
+  static const Duration initialRetryDelay = Duration(seconds: 1);
 
   KoreanBookRepositoryImpl({
     required this.remoteDataSource,
@@ -21,33 +25,45 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
   }) : super(networkInfo);
 
   @override
-  Future<ApiResult<List<BookItem>>> getBooks(CourseCategory category, {int page = 0, int pageSize = 5}) async {
+  Future<ApiResult<List<BookItem>>> getBooks(
+    CourseCategory category, {
+    int page = 0,
+    int pageSize = 5,
+  }) async {
     if (category != CourseCategory.korean) {
       return ApiResult.success([]);
     }
 
-    if (page == 0) {
-      final cachedResult = await getBooksFromCache();
-      if (cachedResult.isSuccess && cachedResult.data!.isNotEmpty) {
-        return cachedResult;
-      }
-    }
-
-    return handleRepositoryCall(
-      () => remoteDataSource.getKoreanBooks(page: page, pageSize: pageSize),
-      cacheCall: page == 0 ? () => getBooksFromCache() : null,
-      cacheData: (books) async {
-        final cacheResult = await localDataSource.cacheKoreanBooks(books);
-        if (!cacheResult.isSuccess) {
-          dev.log('Failed to cache books: ${cacheResult.error}');
+    return _executeWithRetry(() async {
+      // For pagination beyond first page, always fetching from remote
+      if (page > 0) {
+        if (!await networkInfo.isConnected) {
+          throw Exception('No internet connection for pagination');
         }
-      },
-    );
+        return await remoteDataSource.getKoreanBooks(page: page, pageSize: pageSize);
+      }
+
+      // Check cache validity for first page
+      if (await localDataSource.isCacheValid()) {
+        final cachedBooks = await localDataSource.getCachedKoreanBooks();
+        if (cachedBooks.isNotEmpty) {
+          return cachedBooks;
+        }
+      }
+
+      // Fetch from remote and cache
+      return await _fetchAndCacheBooks(pageSize: pageSize);
+    });
   }
 
   @override
-  Future<ApiResult<List<BookItem>>> getBooksFromCache() {
-    return localDataSource.getCachedKoreanBooks();
+  Future<ApiResult<List<BookItem>>> getBooksFromCache() async {
+    try {
+      final books = await localDataSource.getCachedKoreanBooks();
+      return ApiResult.success(books);
+    } catch (e) {
+      return ApiResult.failure('Failed to get cached books: $e', FailureType.cache);
+    }
   }
 
   @override
@@ -56,366 +72,422 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
       return ApiResult.success(false);
     }
     
-    return handleRepositoryCall(
-      () => remoteDataSource.hasMoreBooks(currentCount),
-      cacheCall: () async {
-        final countResult = await localDataSource.getCachedBooksCount();
-        if (countResult.isSuccess) {
-          return ApiResult.success(currentCount < countResult.data!);
-        }
-        return countResult.fold(
-          onSuccess: (_) => ApiResult.success(false),
-          onFailure: (msg, type) => ApiResult.failure(msg, type),
-        );
-      },
-    );
+    if (!await networkInfo.isConnected) {
+      try {
+        final totalCached = await localDataSource.getCachedBooksCount();
+        return ApiResult.success(currentCount < totalCached);
+      } catch (e) {
+        return ApiResult.success(false);
+      }
+    }
+
+    return _executeWithRetry(() async {
+      return await remoteDataSource.hasMoreBooks(currentCount);
+    });
   }
 
   @override
-  Future<ApiResult<List<BookItem>>> hardRefreshBooks(CourseCategory category, {int pageSize = 5}) async {
+  Future<ApiResult<List<BookItem>>> hardRefreshBooks(
+    CourseCategory category, {
+    int pageSize = 5,
+  }) async {
     if (category != CourseCategory.korean) {
       return ApiResult.success([]);
     }
 
-    return handleRepositoryCall(
-      () async {
-        final clearResult = await clearCachedBooks();
-        if (!clearResult.isSuccess) {
-          dev.log('Failed to clear cache: ${clearResult.error}');
-        }
-        
-        return await remoteDataSource.getKoreanBooks(page: 0, pageSize: pageSize);
-      },
-      cacheCall: () => localDataSource.getCachedKoreanBooks(),
-      cacheData: (books) async {
-        final cacheResult = await localDataSource.cacheKoreanBooks(books);
-        if (!cacheResult.isSuccess) {
-          dev.log('Failed to cache books: ${cacheResult.error}');
-        }
-      },
-    );
+    return _executeWithRetry(() async {
+      // Clear cache first
+      await localDataSource.clearCachedKoreanBooks();
+      
+      // Fetch fresh data
+      return await _fetchAndCacheBooks(pageSize: pageSize);
+    });
   }
 
   @override
   Future<ApiResult<List<BookItem>>> searchBooks(CourseCategory category, String query) async {
-    if (category != CourseCategory.korean) {
+    if (category != CourseCategory.korean || query.trim().length < 2) {
       return ApiResult.success([]);
     }
 
-    final cachedResults = await _searchInCache(query);
-    
-    return handleRepositoryCall(
-      () => remoteDataSource.searchKoreanBooks(query),
-      cacheCall: () async => cachedResults,
-      cacheData: (books) async {
-        if (books.isNotEmpty) {
-          final cacheResult = await localDataSource.cacheKoreanBooks(books);
-          if (!cacheResult.isSuccess) {
-            dev.log('Failed to cache search results: ${cacheResult.error}');
-          }
+    try {
+      // Always search in cache first for better UX
+      final cachedBooks = await localDataSource.getCachedKoreanBooks();
+      final cachedResults = _searchInCache(cachedBooks, query);
+      
+      if (!await networkInfo.isConnected) {
+        return ApiResult.success(cachedResults);
+      }
+
+      // Search remotely with retry
+      return await _executeWithRetry(() async {
+        final remoteResults = await remoteDataSource.searchKoreanBooks(query);
+        
+        // Cache new search results
+        if (remoteResults.isNotEmpty) {
+          await localDataSource.cacheKoreanBooks(remoteResults);
         }
-      },
-    );
-  }
-
-  @override
-  Future<ApiResult<void>> clearCachedBooks() {
-    return localDataSource.clearCachedKoreanBooks();
-  }
-
-  Future<ApiResult<List<BookItem>>> _searchInCache(String query) async {
-    final allCachedBooksResult = await getBooksFromCache();
-    if (!allCachedBooksResult.isSuccess) {
-      return allCachedBooksResult;
-    }
-    
-    final allCachedBooks = allCachedBooksResult.data!;
-    final normalizedQuery = query.toLowerCase();
-    
-    final results = allCachedBooks.where((book) {
-      return book.title.toLowerCase().contains(normalizedQuery) ||
-             book.description.toLowerCase().contains(normalizedQuery);
-    }).toList();
-    
-    return ApiResult.success(results);
-  }
-  
-  @override
-  Future<ApiResult<File?>> getBookPdf(String bookId) async {
-    dev.log('Getting PDF for bookId: $bookId');
-    
-    final cachedPdfResult = await localDataSource.getCachedPdfFile(bookId);
-    if (cachedPdfResult.isSuccess && cachedPdfResult.data != null) {
-      final cachedPdf = cachedPdfResult.data!;
-      if (await cachedPdf.exists() && await cachedPdf.length() > 0) {
-        dev.log('Using cached PDF file: ${cachedPdf.path}');
-        return ApiResult.success(cachedPdf);
+        
+        // Combine and deduplicate results
+        final combinedResults = _combineAndDeduplicateResults(cachedResults, remoteResults);
+        return combinedResults;
+      });
+      
+    } catch (e) {
+      // Return cached results if remote search fails
+      try {
+        final cachedBooks = await localDataSource.getCachedKoreanBooks();
+        final cachedResults = _searchInCache(cachedBooks, query);
+        return ApiResult.success(cachedResults);
+      } catch (cacheError) {
+        return _mapExceptionToApiResult(e as Exception);
       }
     }
-    
-    return handleRepositoryCall(
-      () async {
-        final searchResult = await searchBooks(CourseCategory.korean, '');
-        if (!searchResult.isSuccess) {
-          throw Exception('Failed to search books: ${searchResult.error}');
-        }
-        
-        final books = searchResult.data!;
-        final book = books.firstWhere(
-          (book) => book.id == bookId,
-          orElse: () => throw Exception('Book not found')
-        );
-        
-        String? pdfUrl = book.pdfUrl;
-        bool urlWorking = false;
-        
-        if (pdfUrl != null && pdfUrl.isNotEmpty) {
-          dev.log('Attempting to use existing PDF URL: $pdfUrl');
-          final verifyResult = await remoteDataSource.verifyUrlIsWorking(pdfUrl);
-          if (verifyResult.isSuccess) {
-            urlWorking = verifyResult.data ?? false;
-            dev.log('PDF URL check result: ${urlWorking ? "Valid" : "Invalid"}');
-          }
-        }
-        
-        if ((!urlWorking || pdfUrl == null || pdfUrl.isEmpty) && 
-            book.pdfPath != null && book.pdfPath!.isNotEmpty) {
-          dev.log('PDF URL missing or invalid, attempting to regenerate from path: ${book.pdfPath}');
-          final regenerateResult = await remoteDataSource.regenerateUrlFromPath(book.pdfPath!);
-          
-          if (regenerateResult.isSuccess && regenerateResult.data != null && regenerateResult.data!.isNotEmpty) {
-            pdfUrl = regenerateResult.data!;
-            
-            final updatedBook = BookItem(
-              id: book.id,
-              title: book.title,
-              description: book.description,
-              bookImage: book.bookImage,
-              pdfUrl: pdfUrl,
-              bookImagePath: book.bookImagePath,
-              pdfPath: book.pdfPath,
-              duration: book.duration,
-              chaptersCount: book.chaptersCount,
-              icon: book.icon,
-              level: book.level,
-              courseCategory: book.courseCategory,
-              country: book.country,
-              category: book.category,
-            );
-            
-            final updateResult = await updateBookMetadata(updatedBook);
-            if (updateResult.isSuccess) {
-              dev.log('Successfully regenerated PDF URL and updated book');
-              urlWorking = true;
-            }
-          }
-        }
-        
-        if (pdfUrl == null || pdfUrl.isEmpty || !urlWorking) {
-          throw Exception('Book has no valid PDF URL and regeneration failed');
-        }
-        
-        final directory = await getApplicationDocumentsDirectory();
-        final tempPath = '${directory.path}/temp_${bookId}_${DateTime.now().millisecondsSinceEpoch}.pdf';
-        
-        final downloadResult = await remoteDataSource.downloadPdfToLocal(bookId, tempPath);
-        if (!downloadResult.isSuccess) {
-          throw Exception('Failed to download PDF: ${downloadResult.error}');
-        }
-        
-        final downloadedFile = downloadResult.data;
-        if (downloadedFile != null && await downloadedFile.exists() && await downloadedFile.length() > 0) {
-          final cacheResult = await localDataSource.cachePdfFile(bookId, downloadedFile);
-          if (!cacheResult.isSuccess) {
-            dev.log('Failed to cache PDF: ${cacheResult.error}');
-          }
-          
-          try {
-            await downloadedFile.delete();
-          } catch (e) {
-            // Ignore error deleting temp file
-          }
-          
-          final finalResult = await localDataSource.getCachedPdfFile(bookId);
-          if (finalResult.isSuccess) {
-            return ApiResult.success(finalResult.data);
-          } else {
-            return ApiResult.failure('Failed to get cached PDF file: ${finalResult.error}');
-          }
-        }
-        
-        return ApiResult.success(null);
-      },
-    );
-  }
-  
-  @override
-  Future<ApiResult<bool>> uploadBookWithPdf(BookItem book, File pdfFile) {
-    return handleRepositoryCall(
-      () async {
-        if (book.id.isEmpty) {
-          throw Exception('Book ID cannot be empty');
-        }
-        
-        final pdfUploadResult = await remoteDataSource.uploadPdfFile(book.id, pdfFile);
-        if (!pdfUploadResult.isSuccess) {
-          throw Exception('Failed to upload PDF: ${pdfUploadResult.error}');
-        }
-        
-        final uploadData = pdfUploadResult.data!;
-        final bookJson = book.toJson();
-        bookJson['pdfUrl'] = uploadData.$1;
-        bookJson['pdfPath'] = uploadData.$2;
-        final updatedBook = BookItem.fromJson(bookJson);
-        
-        final bookUploadResult = await remoteDataSource.uploadBook(updatedBook);
-        if (!bookUploadResult.isSuccess) {
-          throw Exception('Failed to upload book: ${bookUploadResult.error}');
-        }
-        
-        final cacheBookResult = await localDataSource.cacheKoreanBooks([updatedBook]);
-        if (!cacheBookResult.isSuccess) {
-          dev.log('Failed to cache book: ${cacheBookResult.error}');
-        }
-        
-        final cachePdfResult = await localDataSource.cachePdfFile(book.id, pdfFile);
-        if (!cachePdfResult.isSuccess) {
-          dev.log('Failed to cache PDF: ${cachePdfResult.error}');
-        }
-        
-        return ApiResult.success(bookUploadResult.data!);
-      },
-    );
   }
 
   @override
-  Future<ApiResult<bool>> updateBookMetadata(BookItem book) {
-    return handleRepositoryCall(
-      () async {
-        final result = await remoteDataSource.updateBook(book.id, book);
-        if (!result.isSuccess) {
-          throw Exception('Failed to update book: ${result.error}');
-        }
-        
-        final updateLocalResult = await localDataSource.updateBookMetadata(book);
-        if (!updateLocalResult.isSuccess) {
-          dev.log('Failed to update local book metadata: ${updateLocalResult.error}');
-        }
-        
-        return ApiResult.success(result.data!);
-      },
-    );
+  Future<ApiResult<void>> clearCachedBooks() async {
+    try {
+      await localDataSource.clearCachedKoreanBooks();
+      return ApiResult.success(null);
+    } catch (e) {
+      return ApiResult.failure('Failed to clear cache: $e', FailureType.cache);
+    }
   }
-  
+
   @override
-  Future<ApiResult<String?>> uploadBookCoverImage(String bookId, File imageFile) {
-    return handleRepositoryCall(
-      () async {
-        final imageUploadResult = await remoteDataSource.uploadCoverImage(bookId, imageFile);
-        if (!imageUploadResult.isSuccess) {
-          throw Exception('Failed to upload cover image: ${imageUploadResult.error}');
-        }
-        
-        final uploadData = imageUploadResult.data!;
-        final cachedBooksResult = await localDataSource.getCachedKoreanBooks();
-        
-        if (cachedBooksResult.isSuccess) {
-          final cachedBooks = cachedBooksResult.data!;
-          final bookIndex = cachedBooks.indexWhere((b) => b.id == bookId);
-          
-          if (bookIndex != -1) {
-            final updatedBook = cachedBooks[bookIndex];
-            final updatedBookData = updatedBook.toJson();
-            updatedBookData['bookImage'] = uploadData.$1;
-            updatedBookData['bookImagePath'] = uploadData.$2;
-            
-            final book = BookItem.fromJson(updatedBookData);
-            final updateLocalResult = await localDataSource.updateBookMetadata(book);
-            if (!updateLocalResult.isSuccess) {
-              dev.log('Failed to update local book metadata: ${updateLocalResult.error}');
-            }
-            
-            final updateRemoteResult = await remoteDataSource.updateBook(bookId, book);
-            if (!updateRemoteResult.isSuccess) {
-              dev.log('Failed to update remote book: ${updateRemoteResult.error}');
-            }
-          }
-        }
-        
-        return ApiResult.success(uploadData.$1);
-      },
-    );
+  Future<ApiResult<File?>> getBookPdf(String bookId) async {
+    try {
+      // Check cached PDF first with validation
+      final cachedPdf = await localDataSource.getCachedPdfFile(bookId);
+      if (cachedPdf != null && await _isValidPDF(cachedPdf)) {
+        return ApiResult.success(cachedPdf);
+      }
+
+      if (!await networkInfo.isConnected) {
+        return ApiResult.failure('No internet connection and no valid cached PDF', FailureType.network);
+      }
+
+      // Download and cache PDF with retry
+      return await _executeWithRetry(() async {
+        return await _downloadAndCachePdf(bookId);
+      });
+      
+    } catch (e) {
+      return _mapExceptionToApiResult(e as Exception);
+    }
   }
-  
+
+  @override
+  Future<ApiResult<bool>> updateBookMetadata(BookItem book) async {
+    if (!await networkInfo.isConnected) {
+      return ApiResult.failure('No internet connection', FailureType.network);
+    }
+
+    return _executeWithRetry(() async {
+      final success = await remoteDataSource.updateBook(book.id, book);
+      
+      if (success) {
+        try {
+          await localDataSource.updateBookMetadata(book);
+        } catch (e) {
+          dev.log('Failed to update local cache: $e');
+        }
+      }
+      
+      return success;
+    });
+  }
+
+  @override
+  Future<ApiResult<bool>> deleteBookWithFiles(String bookId) async {
+    if (!await networkInfo.isConnected) {
+      return ApiResult.failure('No internet connection', FailureType.network);
+    }
+
+    return _executeWithRetry(() async {
+      final success = await remoteDataSource.deleteBook(bookId);
+      
+      if (success) {
+        try {
+          await localDataSource.removeBookFromCache(bookId);
+          await localDataSource.clearCachedPdf(bookId);
+        } catch (e) {
+          dev.log('Failed to remove from cache: $e');
+        }
+      }
+      
+      return success;
+    });
+  }
+
+  @override
+  Future<ApiResult<bool>> uploadBookWithPdf(BookItem book, File pdfFile) async {
+    if (!await networkInfo.isConnected) {
+      return ApiResult.failure('No internet connection', FailureType.network);
+    }
+
+    if (book.id.isEmpty) {
+      return ApiResult.failure('Book ID cannot be empty', FailureType.validation);
+    }
+
+    return _executeWithRetry(() async {
+      // Upload PDF first
+      final pdfUploadData = await remoteDataSource.uploadPdfFile(book.id, pdfFile);
+      
+      // Update book with PDF info and upload
+      final updatedBook = book.copyWith(
+        pdfUrl: pdfUploadData.$1,
+        pdfPath: pdfUploadData.$2,
+      );
+
+      final success = await remoteDataSource.uploadBook(updatedBook);
+      
+      if (success) {
+        try {
+          await localDataSource.cacheKoreanBooks([updatedBook]);
+          await localDataSource.cachePdfFile(book.id, pdfFile);
+        } catch (e) {
+          dev.log('Failed to cache after upload: $e');
+        }
+      }
+      
+      return success;
+    });
+  }
+
+  @override
+  Future<ApiResult<String?>> uploadBookCoverImage(String bookId, File imageFile) async {
+    if (!await networkInfo.isConnected) {
+      return ApiResult.failure('No internet connection', FailureType.network);
+    }
+
+    return _executeWithRetry(() async {
+      final uploadData = await remoteDataSource.uploadCoverImage(bookId, imageFile);
+      final imageUrl = uploadData.$1;
+      final imagePath = uploadData.$2;
+      
+      // Update book in cache with new image URL
+      try {
+        await _updateBookImageInCache(bookId, imageUrl, imagePath);
+      } catch (e) {
+        dev.log('Failed to update cache with new image: $e');
+      }
+      
+      return imageUrl;
+    });
+  }
+
   @override
   Future<ApiResult<String?>> regenerateImageUrl(BookItem book) async {
     if (book.bookImagePath == null || book.bookImagePath!.isEmpty) {
       return ApiResult.success(null);
     }
-    
-    return handleRepositoryCall(
-      () async {
-        final regenerateResult = await remoteDataSource.regenerateUrlFromPath(book.bookImagePath!);
-        if (!regenerateResult.isSuccess || regenerateResult.data == null || regenerateResult.data!.isEmpty) {
-          return ApiResult.success(null);
+
+    if (!await networkInfo.isConnected) {
+      return ApiResult.failure('No internet connection', FailureType.network);
+    }
+
+    return _executeWithRetry(() async {
+      final newUrl = await remoteDataSource.regenerateUrlFromPath(book.bookImagePath!);
+      
+      if (newUrl != null && newUrl.isNotEmpty) {
+        final updatedBook = book.copyWith(bookImage: newUrl);
+        
+        try {
+          await localDataSource.updateBookMetadata(updatedBook);
+          await remoteDataSource.updateBook(book.id, updatedBook);
+        } catch (e) {
+          dev.log('Failed to update book with new image URL: $e');
         }
-        
-        final newUrl = regenerateResult.data!;
-        final updatedBookData = book.toJson();
-        updatedBookData['bookImage'] = newUrl;
-        final updatedBook = BookItem.fromJson(updatedBookData);
-        
-        final updateLocalResult = await localDataSource.updateBookMetadata(updatedBook);
-        if (!updateLocalResult.isSuccess) {
-          dev.log('Failed to update local book metadata: ${updateLocalResult.error}');
-        }
-        
-        final updateRemoteResult = await remoteDataSource.updateBook(book.id, updatedBook);
-        if (!updateRemoteResult.isSuccess) {
-          dev.log('Failed to update remote book: ${updateRemoteResult.error}');
-        }
-        
-        return ApiResult.success(newUrl);
-      },
-    );
+      }
+      
+      return newUrl;
+    });
   }
-  
-  @override
-  Future<ApiResult<bool>> deleteBookWithFiles(String bookId) {
-    return handleRepositoryCall(
-      () async {
-        final deleteResult = await remoteDataSource.deleteBook(bookId);
-        if (!deleteResult.isSuccess) {
-          throw Exception('Failed to delete book: ${deleteResult.error}');
+
+  // Private helper methods
+  Future<ApiResult<T>> _executeWithRetry<T>(Future<T> Function() operation) async {
+    Exception? lastException;
+    
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        final result = await operation();
+        return ApiResult.success(result);
+      } catch (e) {
+        lastException = e as Exception;
+        
+        if (attempt == maxRetries) {
+          break;
         }
         
-        final cachedBooksResult = await localDataSource.getCachedKoreanBooks();
-        if (cachedBooksResult.isSuccess) {
-          final cachedBooks = cachedBooksResult.data!;
-          final updatedBooks = cachedBooks.where((book) => book.id != bookId).toList();
-          
-          final clearResult = await localDataSource.clearCachedKoreanBooks();
-          if (!clearResult.isSuccess) {
-            dev.log('Failed to clear cached books: ${clearResult.error}');
-          }
-          
-          if (updatedBooks.isNotEmpty) {
-            final cacheResult = await localDataSource.cacheKoreanBooks(updatedBooks);
-            if (!cacheResult.isSuccess) {
-              dev.log('Failed to cache updated books: ${cacheResult.error}');
-            }
-          }
-        }
+        // Exponential backoff
+        final delay = Duration(seconds: initialRetryDelay.inSeconds * attempt);
+        await Future.delayed(delay);
         
-        final clearPdfResult = await localDataSource.clearCachedPdf(bookId);
-        if (!clearPdfResult.isSuccess) {
-          dev.log('Failed to clear cached PDF: ${clearPdfResult.error}');
-        }
+        dev.log('Retry attempt $attempt failed: $e. Retrying in ${delay.inSeconds}s...');
+      }
+    }
+    
+    return _mapExceptionToApiResult(lastException!);
+  }
+
+  Future<List<BookItem>> _fetchAndCacheBooks({required int pageSize}) async {
+    if (!await networkInfo.isConnected) {
+      // Try to return cached data as fallback
+      final cachedBooks = await localDataSource.getCachedKoreanBooks();
+      if (cachedBooks.isNotEmpty) {
+        return cachedBooks;
+      }
+      throw Exception('No internet connection and no cached data');
+    }
+
+    final remoteBooks = await remoteDataSource.getKoreanBooks(page: 0, pageSize: pageSize);
+    
+    // Detect deleted books for cache sync
+    final deletedIds = await localDataSource.getDeletedBookIds(remoteBooks);
+    for (final deletedId in deletedIds) {
+      await localDataSource.removeBookFromCache(deletedId);
+    }
+    
+    // Cache new/updated books
+    await localDataSource.cacheKoreanBooks(remoteBooks);
+    
+    return remoteBooks;
+  }
+
+  List<BookItem> _searchInCache(List<BookItem> books, String query) {
+    final normalizedQuery = query.toLowerCase();
+    
+    return books.where((book) {
+      return book.title.toLowerCase().contains(normalizedQuery) ||
+             book.description.toLowerCase().contains(normalizedQuery) ||
+             book.category.toLowerCase().contains(normalizedQuery);
+    }).toList();
+  }
+
+  List<BookItem> _combineAndDeduplicateResults(
+    List<BookItem> cachedBooks,
+    List<BookItem> remoteBooks,
+  ) {
+    final Map<String, BookItem> uniqueBooks = {};
+    
+    // Add cached books first
+    for (final book in cachedBooks) {
+      uniqueBooks[book.id] = book;
+    }
+    
+    // Add remote books (will override cached if same ID)
+    for (final book in remoteBooks) {
+      uniqueBooks[book.id] = book;
+    }
+    
+    return uniqueBooks.values.toList();
+  }
+
+  Future<File?> _downloadAndCachePdf(String bookId) async {
+    try {
+      // Get PDF URL from remote
+      final pdfUrl = await remoteDataSource.getPdfDownloadUrl(bookId);
+      if (pdfUrl == null || pdfUrl.isEmpty) {
+        throw Exception('PDF URL not found for book');
+      }
+
+      // Create temp file for download
+      final directory = await getApplicationDocumentsDirectory();
+      final tempPath = '${directory.path}/temp_${bookId}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      
+      // Download PDF
+      final downloadedFile = await remoteDataSource.downloadPdfToLocal(bookId, tempPath);
+      if (downloadedFile == null) {
+        throw Exception('Failed to download PDF');
+      }
+
+      // Verify downloaded file
+      if (!await downloadedFile.exists() || await downloadedFile.length() == 0) {
+        throw Exception('Downloaded PDF is invalid');
+      }
+
+      if (!await _isValidPDF(downloadedFile)) {
+        throw Exception('Downloaded file is not a valid PDF');
+      }
+
+      // Cache the PDF
+      try {
+        await localDataSource.cachePdfFile(bookId, downloadedFile);
+      } catch (e) {
+        dev.log('Failed to cache PDF: $e');
+      }
+
+      // Clean up temp file
+      try {
+        await downloadedFile.delete();
+      } catch (e) {
+        dev.log('Failed to delete temp file: $e');
+      }
+
+      // Return cached PDF
+      return await localDataSource.getCachedPdfFile(bookId);
+    } catch (e) {
+      throw Exception('Error downloading PDF: $e');
+    }
+  }
+
+  Future<void> _updateBookImageInCache(String bookId, String imageUrl, String imagePath) async {
+    try {
+      final cachedBooks = await localDataSource.getCachedKoreanBooks();
+      final bookIndex = cachedBooks.indexWhere((b) => b.id == bookId);
+      
+      if (bookIndex != -1) {
+        final updatedBook = cachedBooks[bookIndex].copyWith(
+          bookImage: imageUrl,
+          bookImagePath: imagePath,
+        );
         
-        return ApiResult.success(deleteResult.data!);
-      },
-    );
+        await localDataSource.updateBookMetadata(updatedBook);
+        await remoteDataSource.updateBook(bookId, updatedBook);
+      }
+    } catch (e) {
+      dev.log('Error updating book image in cache: $e');
+    }
+  }
+
+  Future<bool> _isValidPDF(File pdfFile) async {
+    try {
+      if (!await pdfFile.exists()) return false;
+      
+      final fileSize = await pdfFile.length();
+      if (fileSize < 1024) return false; // Too small to be valid PDF
+      
+      // Check PDF header
+      final bytes = await pdfFile.readAsBytes();
+      if (bytes.length < 4) return false;
+      
+      final header = String.fromCharCodes(bytes.take(4));
+      return header == '%PDF';
+      
+    } catch (e) {
+      return false;
+    }
+  }
+
+  ApiResult<T> _mapExceptionToApiResult<T>(Exception e) {
+    final message = e.toString();
+    
+    if (message.contains('Permission denied')) {
+      return ApiResult.failure(message, FailureType.permission);
+    } else if (message.contains('not found') || message.contains('Resource not found')) {
+      return ApiResult.failure(message, FailureType.notFound);
+    } else if (message.contains('Authentication required')) {
+      return ApiResult.failure(message, FailureType.auth);
+    } else if (message.contains('Service unavailable') || message.contains('Server error')) {
+      return ApiResult.failure(message, FailureType.server);
+    } else if (message.contains('No internet connection')) {
+      return ApiResult.failure(message, FailureType.network);
+    } else if (message.contains('validation') || message.contains('cannot be empty')) {
+      return ApiResult.failure(message, FailureType.validation);
+    } else {
+      return ApiResult.failure(message, FailureType.unknown);
+    }
   }
 }
-
-  

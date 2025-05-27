@@ -336,7 +336,6 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
           }
         }
         
-        // Handle general errors (not operation-specific)
         if (state.hasError) {
           _snackBarCubit.showErrorLocalized(
             korean: state.error ?? '오류가 발생했습니다.',
@@ -345,8 +344,10 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
         }
       },
       builder: (context, state) {
-        // If offline and loading state (no cached data), show offline message
-        if (isOffline && state.isLoading && _koreanBooksCubit.cachedState == null) {
+        // FIXED: Removed cachedState references and simplified logic
+        
+        // If offline and we have no data, show offline message
+        if (isOffline && state.books.isEmpty && state.isLoading) {
           return ErrorView(
             message: '',
             errorType: FailureType.network,
@@ -359,31 +360,12 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
           );
         }
         
-        // If loading (and online) and no cached data, show loading skeleton
-        if (state.isLoading && _koreanBooksCubit.cachedState == null) {
+        // If loading and no data, show loading skeleton
+        if (state.isLoading && state.books.isEmpty) {
           return const BookGridSkeleton();
         }
         
-        // If error but cached data available, show cached data with error banner
-        if (state.hasError && _koreanBooksCubit.cachedState != null) {
-          return Column(
-            children: [
-              ErrorView(
-                message: state.error ?? '',
-                errorType: state.errorType,
-                onRetry: () {
-                  _koreanBooksCubit.loadInitialBooks();
-                },
-                isCompact: true,
-              ),
-              Expanded(
-                child: _buildBooksContent(_koreanBooksCubit.cachedState!),
-              ),
-            ],
-          );
-        }
-        
-        // If error and no cached data, show error message with retry button
+        // If error and no data, show error message with retry button
         if (state.hasError && state.books.isEmpty) {
           return ErrorView(
             message: state.error ?? '',
@@ -394,13 +376,13 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
           );
         }
         
-        // Show books content
-        return _buildBooksContent(state);
+        // Show books content (with error banner if there's an error but we have data)
+        return _buildBooksContent(state, isOffline);
       },
     );
   }
   
-  Widget _buildBooksContent(KoreanBooksState state) {
+  Widget _buildBooksContent(KoreanBooksState state, bool isOffline) {
     if (state.books.isEmpty) {
       return _buildEmptyBooksView(CourseCategory.korean);
     }
@@ -410,29 +392,46 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
     
     return RefreshIndicator(
       onRefresh: _refreshData,
-      child: Stack(
+      child: Column(
         children: [
-          BooksGrid(
-            books: state.books,
-            scrollController: _scrollController,
-            checkEditPermission: _checkEditPermission,
-            onViewClicked: _viewPdf,
-            onTestClicked: _testBook,
-            onToggleFavorite: _toggleFavorite,
-            onEditClicked: _editBook,
-            onDeleteClicked: _deleteBook,
-            onInfoClicked: _showBookDetails,
-            onDownloadClicked: _showDownloadOptions,
-          ),
-          if (isLoadingMore)
-            const Positioned(
-              bottom: 16,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: CircularProgressIndicator(),
-              ),
+          // Show error banner if there's an error but we have cached data
+          if (state.hasError)
+            ErrorView(
+              message: state.error ?? '',
+              errorType: state.errorType,
+              onRetry: () {
+                _koreanBooksCubit.loadInitialBooks();
+              },
+              isCompact: true,
             ),
+          
+          Expanded(
+            child: Stack(
+              children: [
+                BooksGrid(
+                  books: state.books,
+                  scrollController: _scrollController,
+                  checkEditPermission: _checkEditPermission,
+                  onViewClicked: _viewPdf,
+                  onTestClicked: _testBook,
+                  onToggleFavorite: _toggleFavorite,
+                  onEditClicked: _editBook,
+                  onDeleteClicked: _deleteBook,
+                  onInfoClicked: _showBookDetails,
+                  onDownloadClicked: _showDownloadOptions,
+                ),
+                if (isLoadingMore)
+                  const Positioned(
+                    bottom: 16,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: CircularProgressIndicator(),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );

@@ -54,7 +54,7 @@ class BooksGrid extends StatelessWidget {
             return BlocBuilder<FavoriteBooksCubit, FavoriteBooksState>(              
               builder: (context, favoritesState) {            
                     
-                bool isFavorite = favoritesState.books.contains(book);                
+                bool isFavorite = favoritesState.books.any((favBook) => favBook.id == book.id);          
                                 
                 return BookGridCard(                  
                   key: ValueKey(book.id),                  

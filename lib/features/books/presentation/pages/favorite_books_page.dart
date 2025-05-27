@@ -101,7 +101,6 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
           
           return Column(
             children: [
-              // Connectivity status banner
               if (isOffline)
                 ErrorView(
                   message: '',
@@ -125,7 +124,6 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
   Widget _buildFavoriteBooksContent(bool isOffline) {
     return BlocConsumer<FavoriteBooksCubit, FavoriteBooksState>(
       listener: (context, state) {
-
         final operation = state.currentOperation;
         
         if (operation.status == FavoriteBooksOperationStatus.failed) {
@@ -154,7 +152,6 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
           );
         }
         
-        // Handle general errors
         if (state.hasError) {
           _snackBarCubit.showErrorLocalized(
             korean: state.error ?? '오류가 발생했습니다.',
@@ -163,8 +160,10 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
         }
       },
       builder: (context, state) {
-        // If offline and loading state (no cached data), show offline message
-        if (isOffline && state.isLoading && _favoriteBooksCubit.cachedState == null) {
+        // FIXED: Removed cachedState references and simplified logic
+        
+        // If offline and we have no data, show offline message
+        if (isOffline && state.books.isEmpty && state.isLoading) {
           return ErrorView(
             message: '',
             errorType: FailureType.network,
@@ -177,31 +176,12 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
           );
         }
         
-        // If loading (and online) and no cached data, show loading state
-        if (state.isLoading && _favoriteBooksCubit.cachedState == null) {
+        // If loading and no data, show loading state
+        if (state.isLoading && state.books.isEmpty) {
           return _buildLoadingState();
         }
         
-        // If error but cached data available, show cached data with error banner
-        if (state.hasError && _favoriteBooksCubit.cachedState != null) {
-          return Column(
-            children: [
-              ErrorView(
-                message: state.error ?? '',
-                errorType: state.errorType,
-                onRetry: () {
-                  _favoriteBooksCubit.loadInitialBooks();
-                },
-                isCompact: true,
-              ),
-              Expanded(
-                child: _buildFavoritesList(_favoriteBooksCubit.cachedState!),
-              ),
-            ],
-          );
-        }
-        
-        // If error and no cached data, show error message with retry button
+        // If error and no data, show error message with retry button
         if (state.hasError && state.books.isEmpty) {
           return ErrorView(
             message: state.error ?? '',
@@ -212,7 +192,7 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
           );
         }
         
-        // Show favorites content
+        // Show favorites content (with error banner if there's an error but we have data)
         return _buildFavoritesList(state);
       },
     );
@@ -225,26 +205,43 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
     
     return RefreshIndicator(
       onRefresh: _refreshData,
-      child: BooksGrid(
-        books: state.books,
-        scrollController: _scrollController,
-        checkEditPermission: _checkEditPermission,
-        onViewClicked: _viewPdf,
-        onTestClicked: (book) {
-          _snackBarCubit.showInfoLocalized(
-            korean: '테스트 기능이 곧 제공될 예정입니다',
-            english: 'Test functionality coming soon',
-          );
-        },
-        onEditClicked: _editBook,
-        onDeleteClicked: _deleteBook,
-        onToggleFavorite: _toggleFavorite,
-        onInfoClicked: (book) {
-          // TODO: Implement book info
-        },
-        onDownloadClicked: (book) {
-          // TODO: Implement download
-        },
+      child: Column(
+        children: [
+          // Show error banner if there's an error but we have cached data
+          if (state.hasError)
+            ErrorView(
+              message: state.error ?? '',
+              errorType: state.errorType,
+              onRetry: () {
+                _favoriteBooksCubit.loadInitialBooks();
+              },
+              isCompact: true,
+            ),
+          
+          Expanded(
+            child: BooksGrid(
+              books: state.books,
+              scrollController: _scrollController,
+              checkEditPermission: _checkEditPermission,
+              onViewClicked: _viewPdf,
+              onTestClicked: (book) {
+                _snackBarCubit.showInfoLocalized(
+                  korean: '테스트 기능이 곧 제공될 예정입니다',
+                  english: 'Test functionality coming soon',
+                );
+              },
+              onEditClicked: _editBook,
+              onDeleteClicked: _deleteBook,
+              onToggleFavorite: _toggleFavorite,
+              onInfoClicked: (book) {
+                // TODO: Implement book info
+              },
+              onDownloadClicked: (book) {
+                // TODO: Implement download
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
