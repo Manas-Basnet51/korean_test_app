@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -28,6 +29,8 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
   final _scrollController = ScrollController();
   bool _isInitialized = false;
   
+  StreamSubscription<KoreanBooksState>? _pdfLoadingSubscription;
+  
   FavoriteBooksCubit get _favoriteBooksCubit => context.read<FavoriteBooksCubit>();
   KoreanBooksCubit get _koreanBooksCubit => context.read<KoreanBooksCubit>();
   LanguagePreferenceCubit get _languageCubit => context.read<LanguagePreferenceCubit>();
@@ -50,6 +53,7 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _pdfLoadingSubscription?.cancel();
     super.dispose();
   }
   
@@ -121,21 +125,36 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
   Widget _buildFavoriteBooksContent(bool isOffline) {
     return BlocConsumer<FavoriteBooksCubit, FavoriteBooksState>(
       listener: (context, state) {
-        // Handle operation status changes
+
         final operation = state.currentOperation;
         
-        if (operation.status == FavoriteBooksOperationStatus.completed) {
-          if (operation.type == FavoriteBooksOperationType.toggleFavorite) {
-            // Optionally show success message for favorite toggle
+        if (operation.status == FavoriteBooksOperationStatus.failed) {
+          String errorMessage = operation.message ?? 'Operation failed';
+          
+          switch (operation.type) {
+            case FavoriteBooksOperationType.loadBooks:
+              errorMessage = 'Failed to load favorite books';
+              break;
+            case FavoriteBooksOperationType.searchBooks:
+              errorMessage = 'Failed to search favorite books';
+              break;
+            case FavoriteBooksOperationType.toggleFavorite:
+              errorMessage = 'Failed to toggle favorite status';
+              break;
+            case FavoriteBooksOperationType.refreshBooks:
+              errorMessage = 'Failed to refresh favorite books';
+              break;
+            default:
+              break;
           }
-        } else if (operation.status == FavoriteBooksOperationStatus.failed) {
+          
           _snackBarCubit.showErrorLocalized(
-            korean: operation.message ?? '작업 실패',
-            english: operation.message ?? 'Operation failed',
+            korean: errorMessage,
+            english: errorMessage,
           );
         }
         
-        // Handle errors
+        // Handle general errors
         if (state.hasError) {
           _snackBarCubit.showErrorLocalized(
             korean: state.error ?? '오류가 발생했습니다.',
@@ -348,7 +367,9 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
   }
   
   void _listenForPdfLoadingResult(BookItem book) {
-    _koreanBooksCubit.stream.listen((state) {
+    _pdfLoadingSubscription?.cancel();
+    
+    _pdfLoadingSubscription = _koreanBooksCubit.stream.listen((state) {
       if (state.currentOperation.type == KoreanBooksOperationType.loadPdf && 
           state.currentOperation.bookId == book.id) {
         
@@ -356,12 +377,14 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
             state.loadedPdfFile != null) {
           Navigator.of(context, rootNavigator: true).pop();
           _verifyAndOpenPdf(state.loadedPdfFile!, book.title);
+          _pdfLoadingSubscription?.cancel();
         } else if (state.currentOperation.status == KoreanBooksOperationStatus.failed) {
           Navigator.of(context, rootNavigator: true).pop();
           _showRetrySnackBar(
             _getReadableErrorMessage(state.currentOperation.message ?? 'Failed to load PDF'), 
-            () => _viewPdf(book)
+            () => _viewPdf(book),
           );
+          _pdfLoadingSubscription?.cancel();
         }
       }
     });
@@ -420,7 +443,7 @@ class _FavoriteBooksPageState extends State<FavoriteBooksPage> {
   }
   
   void _openPdfViewer(File pdfFile, String title) {
-    GoRouter.of(context).pushNamed(
+    context.push(
       Routes.pdfViewer,
       extra: PDFViewerScreen(
         pdfFile: pdfFile,

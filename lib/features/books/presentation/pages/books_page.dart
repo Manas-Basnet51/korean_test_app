@@ -306,23 +306,37 @@ class _BooksPageState extends State<BooksPage> with SingleTickerProviderStateMix
   Widget _buildKoreanBooksGrid(bool isOffline) {
     return BlocConsumer<KoreanBooksCubit, KoreanBooksState>(
       listener: (context, state) {
-        // Handle operation status changes
         final operation = state.currentOperation;
         
-        if (operation.status == KoreanBooksOperationStatus.completed) {
-          if (operation.type == KoreanBooksOperationType.loadPdf && state.loadedPdfFile != null) {
-            _verifyAndOpenPdf(state.loadedPdfFile!, 'Book PDF');
-          }
-        } else if (operation.status == KoreanBooksOperationStatus.failed) {
-          if (operation.type == KoreanBooksOperationType.loadPdf) {
-            _showRetrySnackBar(
-              _getReadableErrorMessage(operation.message ?? 'Failed to load PDF'), 
-              () => _koreanBooksCubit.loadBookPdf(operation.bookId ?? ''),
+        if (operation.status == KoreanBooksOperationStatus.failed) {
+          if (operation.type != KoreanBooksOperationType.loadPdf) {
+            String errorMessage = operation.message ?? 'Operation failed';
+            
+            switch (operation.type) {
+              case KoreanBooksOperationType.loadBooks:
+                errorMessage = 'Failed to load books';
+                break;
+              case KoreanBooksOperationType.loadMoreBooks:
+                errorMessage = 'Failed to load more books';
+                break;
+              case KoreanBooksOperationType.searchBooks:
+                errorMessage = 'Failed to search books';
+                break;
+              case KoreanBooksOperationType.refreshBooks:
+                errorMessage = 'Failed to refresh books';
+                break;
+              default:
+                break;
+            }
+            
+            _snackBarCubit.showErrorLocalized(
+              korean: errorMessage,
+              english: errorMessage,
             );
           }
         }
         
-        // Handle errors
+        // Handle general errors (not operation-specific)
         if (state.hasError) {
           _snackBarCubit.showErrorLocalized(
             korean: state.error ?? '오류가 발생했습니다.',
