@@ -1,5 +1,6 @@
 // lib/core/di/feature_di/profile_di.dart
 import 'package:get_it/get_it.dart';
+import 'package:korean_language_app/features/profile/data/datasources/profile_local_data_source.dart';
 import 'package:korean_language_app/features/profile/data/datasources/profile_remote_data_source.dart';
 import 'package:korean_language_app/features/profile/data/repositories/profile_repository_impl.dart';
 import 'package:korean_language_app/features/profile/domain/repositories/profile_repository.dart';
@@ -11,11 +12,14 @@ void registerProfileDependencies(GetIt sl) {
   
   // Repository
   sl.registerLazySingleton<ProfileRepository>(
-    () => ProfileRepositoryImpl(dataSource: sl(),networkInfo: sl()),
+    () => ProfileRepositoryImpl(remoteDataSource: sl(),networkInfo: sl(),localDataSource: sl()),
   );
   
   // Data Source
   sl.registerLazySingleton<ProfileDataSource>(
     () => FirestoreProfileDataSource(firestore: sl(), storage: sl()),
+  );
+  sl.registerLazySingleton<ProfileLocalDataSource>(
+    () => ProfileLocalDataSourceImpl(sharedPreferences: sl()),
   );
 }

@@ -1,53 +1,83 @@
+import 'dart:developer' as dev;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:korean_language_app/core/data/base_repository.dart';
 import 'package:korean_language_app/core/errors/api_result.dart';
 import 'package:korean_language_app/core/network/network_info.dart';
+import 'package:korean_language_app/features/profile/data/datasources/profile_local_data_source.dart';
 import 'package:korean_language_app/features/profile/data/datasources/profile_remote_data_source.dart';
 import 'package:korean_language_app/features/profile/domain/repositories/profile_repository.dart';
 import 'package:korean_language_app/features/profile/data/models/profile_model.dart';
 
 class ProfileRepositoryImpl extends BaseRepository implements ProfileRepository {
-  final ProfileDataSource dataSource;
+  final ProfileDataSource remoteDataSource;
+  final ProfileLocalDataSource localDataSource;
+  
+  // Retry configuration
+  static const int _maxRetries = 3;
+  static const Duration _initialRetryDelay = Duration(seconds: 1);
 
   ProfileRepositoryImpl({
-    required this.dataSource,
+    required this.remoteDataSource,
+    required this.localDataSource,
     required NetworkInfo networkInfo,
   }) : super(networkInfo);
 
   @override
-  Future<ApiResult<(bool,String)>> checkAvailability() {
-    return handleRepositoryCall(() => dataSource.checkAvailability());
-  }
-
-  @override
-  Future<ApiResult<ProfileModel>> getProfile(String userId) {
-    return handleRepositoryCall(() async {
-      final result = await dataSource.getProfile(userId);
-      
-      return result.fold(
-        onSuccess: (data) {
-          final profile = ProfileModel(
-            id: userId,
-            name: data['name'] ?? 'User',
-            email: data['email'] ?? '',
-            profileImageUrl: data['profileImageUrl'] ?? '',
-            profileImagePath: data['profileImagePath'], // Added to read from Firestore
-            topikLevel: data['topikLevel'] ?? 'I',
-            completedTests: data['completedTests'] ?? 0,
-            averageScore: data['averageScore'] ?? 0.0,
-            mobileNumber: data['mobileNumber'],
-          );
-          return ApiResult.success(profile);
-        },
-        onFailure: (message, type) => ApiResult.failure(message, type),
-      );
+  Future<ApiResult<(bool, String)>> checkAvailability() {
+    return _executeWithRetry(() async {
+      return await remoteDataSource.checkAvailability();
     });
   }
 
   @override
-  Future<ApiResult<void>> updateProfile(ProfileModel profile) {
-    return handleRepositoryCall(() async {
-      final result = await dataSource.updateProfile(profile.id, {
+  Future<ApiResult<ProfileModel>> getProfile(String userId) async {
+    // Check cache first if offline or cache is valid
+    if (!await networkInfo.isConnected || await localDataSource.isCacheValid(userId)) {
+      final cachedProfile = await localDataSource.getCachedProfile(userId);
+      if (cachedProfile != null) {
+        dev.log('Returning cached profile for user: $userId');
+        return ApiResult.success(cachedProfile);
+      }
+    }
+
+    if (!await networkInfo.isConnected) {
+      return ApiResult.failure('No internet connection and no cached profile', FailureType.network);
+    }
+
+    return _executeWithRetry(() async {
+      final profileData = await remoteDataSource.getProfile(userId);
+      
+      final profile = ProfileModel(
+        id: userId,
+        name: profileData['name'] ?? 'User',
+        email: profileData['email'] ?? '',
+        profileImageUrl: profileData['profileImageUrl'] ?? '',
+        profileImagePath: profileData['profileImagePath'],
+        topikLevel: profileData['topikLevel'] ?? 'I',
+        completedTests: profileData['completedTests'] ?? 0,
+        averageScore: (profileData['averageScore'] ?? 0.0).toDouble(),
+        mobileNumber: profileData['mobileNumber'],
+      );
+
+      // Cache the profile
+      try {
+        await localDataSource.cacheProfile(profile);
+      } catch (e) {
+        dev.log('Failed to cache profile: $e');
+      }
+
+      return profile;
+    });
+  }
+
+  @override
+  Future<ApiResult<void>> updateProfile(ProfileModel profile) async {
+    if (!await networkInfo.isConnected) {
+      return ApiResult.failure('No internet connection', FailureType.network);
+    }
+
+    return _executeWithRetry(() async {
+      final updateData = {
         'name': profile.name,
         'email': profile.email,
         'profileImageUrl': profile.profileImageUrl,
@@ -56,34 +86,92 @@ class ProfileRepositoryImpl extends BaseRepository implements ProfileRepository 
         'completedTests': profile.completedTests,
         'averageScore': profile.averageScore,
         'mobileNumber': profile.mobileNumber,
-      });
-      
-      return result;
+      };
+
+      await remoteDataSource.updateProfile(profile.id, updateData);
+
+      // Update cache
+      try {
+        await localDataSource.cacheProfile(profile);
+      } catch (e) {
+        dev.log('Failed to update cache: $e');
+      }
+
+      return null;
     });
   }
 
   @override
-  Future<ApiResult<(String, String)>> uploadProfileImage(String filePath) {
-    return handleRepositoryCall(() async {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        return ApiResult.failure('User not authenticated', FailureType.auth);
-      }
-      
-      final result = await dataSource.uploadProfileImage(user.uid, filePath);
-      return result;
+  Future<ApiResult<(String, String)>> uploadProfileImage(String filePath) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return ApiResult.failure('User not authenticated', FailureType.auth);
+    }
+
+    if (!await networkInfo.isConnected) {
+      return ApiResult.failure('No internet connection', FailureType.network);
+    }
+
+    return _executeWithRetry(() async {
+      return await remoteDataSource.uploadProfileImage(user.uid, filePath);
     });
   }
 
   @override
-  Future<ApiResult<String?>> regenerateProfileImageUrl(String storagePath) {
-    return handleRepositoryCall(() async {
-      if (storagePath.isEmpty) {
-        return ApiResult.success(null);
-      }
-      
-      return await dataSource.regenerateUrlFromPath(storagePath);
+  Future<ApiResult<String?>> regenerateProfileImageUrl(String storagePath) async {
+    if (storagePath.isEmpty) {
+      return ApiResult.success(null);
+    }
+
+    if (!await networkInfo.isConnected) {
+      return ApiResult.failure('No internet connection', FailureType.network);
+    }
+
+    return _executeWithRetry(() async {
+      return await remoteDataSource.regenerateUrlFromPath(storagePath);
     });
   }
 
+  Future<ApiResult<T>> _executeWithRetry<T>(Future<T> Function() operation) async {
+    Exception? lastException;
+    
+    for (int attempt = 1; attempt <= _maxRetries; attempt++) {
+      try {
+        final result = await operation();
+        return ApiResult.success(result);
+      } catch (e) {
+        lastException = e as Exception;
+        
+        if (attempt == _maxRetries) {
+          break;
+        }
+        
+        // Exponential backoff
+        final delay = Duration(seconds: _initialRetryDelay.inSeconds * attempt);
+        await Future.delayed(delay);
+        
+        dev.log('Retry attempt $attempt failed: $e. Retrying in ${delay.inSeconds}s...');
+      }
+    }
+    
+    return _mapExceptionToApiResult(lastException!);
+  }
+
+  ApiResult<T> _mapExceptionToApiResult<T>(Exception e) {
+    final message = e.toString();
+    
+    if (message.contains('Permission denied')) {
+      return ApiResult.failure(message, FailureType.permission);
+    } else if (message.contains('not found')) {
+      return ApiResult.failure(message, FailureType.notFound);
+    } else if (message.contains('Authentication required')) {
+      return ApiResult.failure(message, FailureType.auth);
+    } else if (message.contains('Service unavailable')) {
+      return ApiResult.failure(message, FailureType.server);
+    } else if (message.contains('No internet connection')) {
+      return ApiResult.failure(message, FailureType.network);
+    } else {
+      return ApiResult.failure(message, FailureType.unknown);
+    }
+  }
 }

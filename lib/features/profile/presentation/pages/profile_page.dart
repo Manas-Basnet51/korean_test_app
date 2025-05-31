@@ -37,7 +37,6 @@ class _ProfilePageState extends State<ProfilePage> {
     super.initState();
     _connectivityCubit = context.read<ConnectivityCubit>();
     
-    // Trigger connectivity check on init
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _connectivityCubit.checkConnectivity();
       setState(() {
@@ -79,7 +78,6 @@ class _ProfilePageState extends State<ProfilePage> {
         elevation: 0,
         backgroundColor: colorScheme.surface,
         actions: [
-          // One-click theme toggle button
           BlocBuilder<ThemeCubit, ThemeMode>(
             builder: (context, themeMode) {
               return IconButton(
@@ -109,13 +107,11 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
       body: BlocBuilder<ConnectivityCubit, ConnectivityState>(
         builder: (context, connectivityState) {
-          // Check for connectivity issues
           final bool isOffline = connectivityState is ConnectivityDisconnected;
           
-          // Show network error banner if offline but allow content to still be visible
           return Column(
             children: [
-              // Connectivity status banner - using ErrorView in compact mode
+              // Connectivity status banner
               if (isOffline)
                 ErrorView(
                   message: '',
@@ -126,11 +122,9 @@ class _ProfilePageState extends State<ProfilePage> {
                   isCompact: true,
                 ),
                 
-              // Profile content with error handling
               Expanded(
                 child: BlocConsumer<ProfileCubit, ProfileState>(
                   listener: (context, state) {
-                    // Handle errors based on type
                     if (state.hasError) {
                       snackBarCubit.showErrorLocalized(
                         korean: state.error ?? '오류가 발생했습니다.',
@@ -138,11 +132,9 @@ class _ProfilePageState extends State<ProfilePage> {
                       );
                     }
                     
-                    // Handle operation status changes for ProfileLoaded states
                     if (state is ProfileLoaded) {
                       final operation = state.currentOperation;
                       
-                      // Only show messages for operations that just completed or failed
                       if (operation.status == ProfileOperationStatus.inProgress) {
                         String message = _getOperationProgressMessage(operation.type, languageCubit);
                         snackBarCubit.showProgressLocalized(
@@ -169,41 +161,32 @@ class _ProfilePageState extends State<ProfilePage> {
                     }
                   },
                   builder: (context, state) {
-                    // Show loading indicator when initializing
                     if (!_isInitialized || state is ProfileInitial) {
                       return const Center(child: CircularProgressIndicator());
                     }
                     
-                    // If offline and loading state (no cached data), show offline message
+                    // If offline and loading with no cached data, show default profile with offline indicators
                     if (isOffline && state.isLoading && context.read<ProfileCubit>().cachedProfile == null) {
-                      return ErrorView(
-                        message: '',
-                        errorType: FailureType.network,
-                        onRetry: () {
-                          context.read<ConnectivityCubit>().checkConnectivity();
-                          if (context.read<ConnectivityCubit>().state is ConnectivityConnected) {
-                            context.read<ProfileCubit>().loadProfile();
-                          }
-                        },
-                      );
+                      return _buildOfflineProfileView(context);
                     }
                     
-                    // If loading (and online) and no cached data, show loading indicator
+                    // If loading and no cached data
                     if (state.isLoading && context.read<ProfileCubit>().cachedProfile == null) {
                       return Center(
                         child: CircularProgressIndicator(color: colorScheme.primary),
                       );
                     } 
                     
-                    // If profile loaded successfully, show profile content
+                    // If profile loaded successfully
                     else if (state is ProfileLoaded) {
                       return ProfileContent(
                         profileData: state,
                         themeText: themeText,
+                        isOffline: isOffline,
                       );
                     } 
                     
-                    // If error but cached data available, show cached data with error banner
+                    // If error but cached data available
                     else if (state.hasError && context.read<ProfileCubit>().cachedProfile != null) {
                       return Column(
                         children: [
@@ -219,13 +202,14 @@ class _ProfilePageState extends State<ProfilePage> {
                             child: ProfileContent(
                               profileData: context.read<ProfileCubit>().cachedProfile!,
                               themeText: themeText,
+                              isOffline: isOffline,
                             ),
                           ),
                         ],
                       );
                     } 
                     
-                    // If error and no cached data, show error message with retry button
+                    // If error and no cached data
                     else if (state.hasError) {
                       log('Error: ${state.error}, Type: ${state.errorType}');
                       return ErrorView(
@@ -237,7 +221,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       );
                     } 
                     
-                    // Default case (not logged in)
+                    // Default case
                     else {
                       return Center(
                         child: Text(
@@ -260,7 +244,6 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
   
-  // Helper method to get appropriate operation progress message
   String _getOperationProgressMessage(ProfileOperationType? type, LanguagePreferenceCubit languageCubit) {
     switch (type) {
       case ProfileOperationType.updateProfile:
@@ -286,7 +269,40 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
   
-  // Helper method to get appropriate operation success message
+  Widget _buildOfflineProfileView(BuildContext context) {
+    final theme = Theme.of(context);
+    final languageCubit = context.watch<LanguagePreferenceCubit>();
+    final currentUser = context.read<AuthCubit>().state;
+    
+    // Create a basic offline profile using current user data
+    String userName = 'User';
+    String userEmail = '';
+    
+    if (currentUser is Authenticated) {
+      userName = currentUser.user.displayName ?? 'User';
+      userEmail = currentUser.user.email ?? '';
+    }
+    
+    final offlineProfile = ProfileLoaded(
+      id: 'offline',
+      name: userName,
+      email: userEmail,
+      profileImageUrl: '',
+      topikLevel: 'I',
+      completedTests: 0,
+      averageScore: 0.0,
+      currentOperation: ProfileOperation(status: ProfileOperationStatus.none),
+    );
+    
+    return ProfileContent(
+      profileData: offlineProfile,
+      themeText: theme.brightness == Brightness.dark 
+          ? languageCubit.getLocalizedText(korean: '다크 모드', english: 'Dark Mode', hardWords: ['다크 모드'])
+          : languageCubit.getLocalizedText(korean: '라이트 모드', english: 'Light Mode', hardWords: ['라이트 모드']),
+      isOffline: true,
+    );
+  }
+  
   String _getOperationSuccessMessage(ProfileOperationType? type, LanguagePreferenceCubit languageCubit) {
     switch (type) {
       case ProfileOperationType.updateProfile:

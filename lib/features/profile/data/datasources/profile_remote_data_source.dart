@@ -3,18 +3,17 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:korean_language_app/core/data/base_datasource.dart';
-import 'package:korean_language_app/core/errors/api_result.dart';
 
 abstract class ProfileDataSource {
-  Future<ApiResult<(bool, String)>> checkAvailability();
-  Future<ApiResult<Map<String, dynamic>>> getProfile(String userId);
-  Future<ApiResult<void>> updateProfile(String userId, Map<String, dynamic> data);
-  Future<ApiResult<(String, String)>> uploadProfileImage(String userId, String filePath); // Changed return type
-  Future<ApiResult<String?>> regenerateUrlFromPath(String storagePath); // Added method
+  Future<(bool, String)> checkAvailability();
+  Future<Map<String, dynamic>> getProfile(String userId);
+  Future<void> updateProfile(String userId, Map<String, dynamic> data);
+  Future<(String, String)> uploadProfileImage(String userId, String filePath);
+  Future<String?> regenerateUrlFromPath(String storagePath);
 }
+
 // Firestore implementation of ProfileDataSource
-class FirestoreProfileDataSource extends BaseDataSource implements ProfileDataSource {
+class FirestoreProfileDataSource implements ProfileDataSource {
   final FirebaseFirestore firestore;
   final FirebaseStorage storage;
 
@@ -24,94 +23,72 @@ class FirestoreProfileDataSource extends BaseDataSource implements ProfileDataSo
   });
 
   @override
-  Future<ApiResult<(bool, String)>> checkAvailability() {
-    return handleAsyncDataSourceCall(() async {
-      bool isStorageAvailable;
-      String message;
-      try {
-        // A simple test to see if we can access Firebase Storage
-        final testRef = storage.ref().child('test.txt');
-        await testRef.getMetadata();
-        isStorageAvailable = true;
-        message = 'Firebase Storage is available.';
-      } catch (e) {
-        // If we get an error, assume storage is not available
-        isStorageAvailable = false;
-        message = 'Firebase Storage is not available. Please set up a pay-as-you-go plan to enable this feature.';
-        log('Firebase Storage not available: ${e.toString()}');
-      }
-
-      return (isStorageAvailable, message);
-    });
+  Future<(bool, String)> checkAvailability() async {
+    try {
+      final testRef = storage.ref().child('test.txt');
+      await testRef.getMetadata();
+      return (true, 'Firebase Storage is available.');
+    } catch (e) {
+      log('Firebase Storage not available: ${e.toString()}');
+      return (false, 'Firebase Storage is not available. Please set up a pay-as-you-go plan to enable this feature.');
+    }
   }
 
   @override
-  Future<ApiResult<Map<String, dynamic>>> getProfile(String userId) {
-    return handleAsyncDataSourceCall(() async {
-      final userDoc = await firestore.collection('users').doc(userId).get();
+  Future<Map<String, dynamic>> getProfile(String userId) async {
+    final userDoc = await firestore.collection('users').doc(userId).get();
+    
+    if (userDoc.exists) {
+      log('Profile found for user: $userId');
+      return userDoc.data() ?? {};
+    } else {
+      final user = FirebaseAuth.instance.currentUser;
+      final defaultProfile = {
+        'id': userId,
+        'name': user?.displayName ?? 'User',
+        'email': user?.email ?? '',
+        'profileImageUrl': user?.photoURL ?? '',
+        'topikLevel': 'I',
+        'completedTests': 0,
+        'averageScore': 0.0,
+      };
       
-      if (userDoc.exists) {
-        log(userDoc.data().toString());
-        return userDoc.data() ?? {};
-      } else {
-        // Create a default profile if it doesn't exist
-        final user = FirebaseAuth.instance.currentUser;
-        final defaultProfile = {
-          'id': userId,
-          'name': user?.displayName ?? 'User',
-          'email': user?.email ?? '',
-          'profileImageUrl': user?.photoURL ?? '',
-          'topikLevel': 'I',
-          'completedTests': 0,
-          'averageScore': 0.0,
-        };
-        
-        // Save default profile to Firestore
-        await firestore.collection('users').doc(userId).set(defaultProfile);
-        
-        return defaultProfile;
-      }
-    });
+      await firestore.collection('users').doc(userId).set(defaultProfile);
+      log('Created default profile for user: $userId');
+      return defaultProfile;
+    }
   }
 
   @override
-  Future<ApiResult<void>> updateProfile(String userId, Map<String, dynamic> data) {
-    return handleAsyncDataSourceCall(() async {
-      await firestore.collection('users').doc(userId).update(data);
-    });
+  Future<void> updateProfile(String userId, Map<String, dynamic> data) async {
+    await firestore.collection('users').doc(userId).update(data);
+    log('Profile updated for user: $userId');
   }
 
   @override
-  Future<ApiResult<(String, String)>> uploadProfileImage(String userId, String filePath) {
-    return handleAsyncDataSourceCall(() async {
-      final storagePath = 'profile_images/$userId.jpg';
+  Future<(String, String)> uploadProfileImage(String userId, String filePath) async {
+    final storagePath = 'profile_images/$userId.jpg';
+    final fileRef = storage.ref().child(storagePath);
+    final uploadTask = await fileRef.putFile(File(filePath));
+    final downloadUrl = await uploadTask.ref.getDownloadURL();
+    
+    log('Profile image uploaded for user: $userId');
+    return (downloadUrl, storagePath);
+  }
+
+  @override
+  Future<String?> regenerateUrlFromPath(String storagePath) async {
+    if (storagePath.isEmpty) return null;
+    
+    try {
       final fileRef = storage.ref().child(storagePath);
-      final uploadTask = await fileRef.putFile(File(filePath));
-      final downloadUrl = await uploadTask.ref.getDownloadURL();
-      return (downloadUrl, storagePath); // Return both URL and storage path
-    });
-  }
-
-  @override
-  Future<ApiResult<String?>> regenerateUrlFromPath(String storagePath) {
-    return handleAsyncDataSourceCall(() async {
-      if (storagePath.isEmpty) {
-        return null;
-      }
+      final newUrl = await fileRef.getDownloadURL();
       
-      try {
-        final fileRef = storage.ref().child(storagePath);
-        final newUrl = await fileRef.getDownloadURL();
-        
-        // Log for debugging
-        log('Original storage path: $storagePath');
-        log('Regenerated URL: $newUrl');
-        
-        return newUrl;
-      } catch (e) {
-        log('Error in regenerateUrlFromPath: ${e.toString()}');
-        rethrow;
-      }
-    });
+      log('Regenerated URL for path: $storagePath');
+      return newUrl;
+    } catch (e) {
+      log('Error regenerating URL: ${e.toString()}');
+      rethrow;
+    }
   }
 }

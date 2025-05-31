@@ -3,11 +3,13 @@ part of '../pages/profile_page.dart';
 class ProfileContent extends StatefulWidget {
   final ProfileLoaded profileData;
   final String themeText;
+  final bool isOffline;
   
   const ProfileContent({
     super.key,
     required this.profileData,
     required this.themeText,
+    this.isOffline = false,
   });
 
   @override
@@ -36,14 +38,13 @@ class _ProfileContentState extends State<ProfileContent> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Header with profile image and info
           ProfileHeaderWidget(
             profileData: widget.profileData, 
             onImagePickRequested: _showImagePickerOptions,
             onImageRemoved: _removeProfileImage,
+            isOffline: widget.isOffline,
           ),
           
-          // Stats and settings
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
@@ -51,7 +52,6 @@ class _ProfileContentState extends State<ProfileContent> {
               children: [
                 const SizedBox(height: 16),
                 
-                // Study statistics heading
                 Text(
                   languageCubit.getLocalizedText(
                     korean: '한국어 학습 진행 상황',
@@ -65,17 +65,17 @@ class _ProfileContentState extends State<ProfileContent> {
                 
                 const SizedBox(height: 16),
                 
-                // Stats row
-                ProfileStatsWidget(profileData: widget.profileData),
+                ProfileStatsWidget(
+                  profileData: widget.profileData,
+                  isOffline: widget.isOffline,
+                ),
                 
                 const SizedBox(height: 24),
                 
-                // Theme selector
                 _buildThemeSelector(isDarkMode),
                 
                 const SizedBox(height: 24),
                 
-                // Settings section
                 ProfileSettingsWidget(
                   profileData: widget.profileData,
                   onEditProfile: _showEditProfileBottomSheet,
@@ -91,7 +91,6 @@ class _ProfileContentState extends State<ProfileContent> {
     );
   }
 
-  // Theme selector widget
   Widget _buildThemeSelector(bool isDarkMode) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
@@ -139,7 +138,6 @@ class _ProfileContentState extends State<ProfileContent> {
     );
   }
 
-  // Image picker options dialog
   void _showImagePickerOptions() {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
@@ -216,7 +214,6 @@ class _ProfileContentState extends State<ProfileContent> {
     );
   }
 
-  // Image source option builder
   Widget _buildImageSourceOption({
     required IconData icon,
     required String label,
@@ -255,13 +252,10 @@ class _ProfileContentState extends State<ProfileContent> {
     );
   }
 
-  // Profile image removal
   void _removeProfileImage() {
     profileCubit.removeProfileImage();
-    // No snackbar here - let the BlocConsumer in ProfilePage handle it
   }
 
-  // Image picker implementation
   Future<void> _pickImage(ImageSource source) async {
     try {
       final imagePicker = ImagePicker();
@@ -274,7 +268,6 @@ class _ProfileContentState extends State<ProfileContent> {
       
       if (pickedFile != null) {
         await profileCubit.uploadImage(pickedFile.path);
-        // No snackbar here - let the BlocConsumer in ProfilePage handle it
       }
     } catch (e) {
       log('Error picking image: $e');
@@ -285,7 +278,6 @@ class _ProfileContentState extends State<ProfileContent> {
     }
   }
 
-  // Edit profile bottom sheet
   void _showEditProfileBottomSheet() {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
@@ -317,7 +309,6 @@ class _ProfileContentState extends State<ProfileContent> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Header with title and close button
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -340,7 +331,6 @@ class _ProfileContentState extends State<ProfileContent> {
                     
                     const SizedBox(height: 20),
                     
-                    // Name field
                     _buildProfileField(
                       context: context,
                       icon: Icons.person,
@@ -355,7 +345,6 @@ class _ProfileContentState extends State<ProfileContent> {
                     
                     const SizedBox(height: 16),
                     
-                    // Email field (read-only)
                     _buildProfileField(
                       context: context,
                       icon: Icons.email,
@@ -371,7 +360,6 @@ class _ProfileContentState extends State<ProfileContent> {
                     
                     const SizedBox(height: 16),
                     
-                    // Mobile number field
                     _buildProfileField(
                       context: context,
                       icon: Icons.phone,
@@ -387,7 +375,6 @@ class _ProfileContentState extends State<ProfileContent> {
                     
                     const SizedBox(height: 16),
                     
-                    // TOPIK level selector
                     Text(
                       languageCubit.getLocalizedText(
                         korean: 'TOPIK 레벨',
@@ -401,7 +388,6 @@ class _ProfileContentState extends State<ProfileContent> {
                     
                     const SizedBox(height: 8),
                     
-                    // TOPIK level selector with chips
                     Wrap(
                       spacing: 8,
                       children: ['I', 'II', 'III', 'IV', 'V', 'VI'].map((level) {
@@ -428,7 +414,6 @@ class _ProfileContentState extends State<ProfileContent> {
                     
                     const SizedBox(height: 32),
                     
-                    // Save button
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -473,7 +458,6 @@ class _ProfileContentState extends State<ProfileContent> {
     );
   }
   
-  // Profile field builder
   Widget _buildProfileField({
     required BuildContext context,
     required IconData icon,
@@ -525,7 +509,6 @@ class _ProfileContentState extends State<ProfileContent> {
     );
   }
 
-  // Logout confirmation bottom sheet
   void _showLogoutConfirmationBottomSheet() {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
@@ -551,7 +534,6 @@ class _ProfileContentState extends State<ProfileContent> {
             ),
             const SizedBox(height: 20),
             
-            // Logout Icon
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -567,7 +549,6 @@ class _ProfileContentState extends State<ProfileContent> {
             
             const SizedBox(height: 16),
             
-            // Title
             Text(
               languageCubit.getLocalizedText(
                 korean: '로그아웃 확인',
@@ -581,7 +562,6 @@ class _ProfileContentState extends State<ProfileContent> {
             
             const SizedBox(height: 12),
             
-            // Message
             Text(
               languageCubit.getLocalizedText(
                 korean: '정말 로그아웃 하시겠습니까?',
@@ -596,10 +576,8 @@ class _ProfileContentState extends State<ProfileContent> {
             
             const SizedBox(height: 32),
             
-            // Buttons
             Row(
               children: [
-                // Cancel button
                 Expanded(
                   child: OutlinedButton(
                     onPressed: () => Navigator.of(context).pop(),
@@ -622,15 +600,11 @@ class _ProfileContentState extends State<ProfileContent> {
                 
                 const SizedBox(width: 16),
                 
-                // Logout button
                 Expanded(
                   child: ElevatedButton(
                     onPressed: () async {
                       Navigator.of(context).pop();
-                      
-                      // No snackbar here - let the BlocConsumer in ProfilePage handle it
                       await context.read<AuthCubit>().signOut();
-                      // context.go(Routes.login); //TODO: implement bloc observer to logout
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: colorScheme.error,
