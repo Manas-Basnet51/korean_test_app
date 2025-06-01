@@ -15,6 +15,7 @@ import 'package:korean_language_app/features/book_upload/presentation/pages/uplo
 import 'package:korean_language_app/features/home/presentation/pages/home_page.dart';
 import 'package:korean_language_app/features/profile/presentation/pages/language_preference_page.dart';
 import 'package:korean_language_app/features/profile/presentation/pages/profile_page.dart';
+import 'package:korean_language_app/features/tests/presentation/pages/test_result_page.dart';
 import 'package:korean_language_app/features/tests/presentation/pages/tests_page.dart';
 import 'package:korean_language_app/features/user_management/presentation/pages/user_management_page.dart';
 import 'package:korean_language_app/core/presentation/widgets/splash/splash_screen.dart';
@@ -120,7 +121,9 @@ class AppRouter {
             path: '/tests',
             name: 'tests',
             builder: (context, state) => const TestsPage(),
-            routes: const [],
+            routes: [
+              //TODO: Implement Routing here
+            ],
           ),
 
           // Books tab
@@ -203,13 +206,20 @@ class Routes {
   static const register = '/register';
   static const forgotPassword = '/forgot-password';
   static const home = '/home';
+
+  //Tests
   static const tests = '/tests';
-  static const profile = '/profile';
+  static const testsUpload = '/tests/upload';
+
+  //Books
   static const books = '/books';
   static const pdfViewer = '/books/pdf-viewer';
   static const uploadBooks = '/books/upload-books';
   static const editBooks = '/books/edit-books';
   static const favoriteBooks = '/books/favorite-books';
+
+  //Profile
+  static const profile = '/profile';
   static const languagePreferences = '/profile/language-preferences';
   static const adminManagement = '/profile/admin-management';
   static const adminSignup = '$adminManagement/admin-signup';

@@ -2,6 +2,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:korean_language_app/core/di/di.dart' as di;
+import 'package:korean_language_app/core/providers/tests_providers.dart';
 import 'package:korean_language_app/core/routes/app_router.dart';
 import 'package:korean_language_app/core/presentation/theme/constants/app_theme.dart';
 import 'package:korean_language_app/firebase_options.dart';
@@ -56,7 +57,8 @@ class MyApp extends StatelessWidget {
           create: (context) => di.sl<ConnectivityCubit>(),
         ),
         ...BookProviders.getProviders(),
-        ...AdminProviders.getProviders()
+        ...AdminProviders.getProviders(),
+        ...TestsProviders.getProviders(),
         // Add other BLoC providers here
       ],
       child: BlocBuilder<ThemeCubit, ThemeMode>(

@@ -10,6 +10,7 @@ import 'package:korean_language_app/core/di/auth_di.dart';
 import 'package:korean_language_app/core/di/books_di.dart';
 import 'package:korean_language_app/core/di/core_di.dart';
 import 'package:korean_language_app/core/di/profile_di.dart';
+import 'package:korean_language_app/core/di/tests_di.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 final sl = GetIt.instance;
@@ -26,6 +27,7 @@ Future<void> init() async {
   registerProfileDependencies(sl);
   registerBooksDependencies(sl);
   registerAdminDependencies(sl);
+  registerTestsDependencies(sl);
 }
    
 Future<void> _registerExternalDependencies() async {
