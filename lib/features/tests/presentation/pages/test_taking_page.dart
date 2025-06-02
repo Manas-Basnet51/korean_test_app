@@ -1,13 +1,14 @@
+import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:korean_language_app/core/presentation/language_preference/bloc/language_preference_cubit.dart';
 import 'package:korean_language_app/core/presentation/snackbar/bloc/snackbar_cubit.dart';
+import 'package:korean_language_app/core/routes/app_router.dart';
 import 'package:korean_language_app/features/tests/data/models/test_question.dart';
 import 'package:korean_language_app/features/tests/presentation/bloc/test_session/test_session_cubit.dart';
 import 'package:korean_language_app/features/tests/presentation/bloc/tests_cubit.dart';
-import 'package:korean_language_app/features/tests/presentation/pages/test_result_page.dart';
 
 class TestTakingPage extends StatefulWidget {
   final String testId;
@@ -55,12 +56,8 @@ class _TestTakingPageState extends State<TestTakingPage> {
     return BlocConsumer<TestSessionCubit, TestSessionState>(
       listener: (context, state) {
         if (state is TestSessionCompleted) {
-          // Navigate to results page
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (context) => TestResultPage(result: state.result),
-            ),
-          );
+          // Fix: Use GoRouter navigation instead of Navigator.pushReplacement
+          context.push(Routes.testResult, extra: state.result);
         } else if (state is TestSessionError) {
           _snackBarCubit.showErrorLocalized(
             korean: state.error ?? '오류가 발생했습니다',
@@ -196,16 +193,6 @@ class _TestTakingPageState extends State<TestTakingPage> {
 
   Widget _buildTestInProgress(TestSession session) {
     final currentQuestion = session.test.questions[session.currentQuestionIndex];
-    final savedAnswer = session.getAnswerForQuestion(session.currentQuestionIndex);
-    
-    // Set selected answer if we have a saved answer
-    if (savedAnswer != null && _selectedAnswerIndex != savedAnswer.selectedAnswerIndex) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        setState(() {
-          _selectedAnswerIndex = savedAnswer.selectedAnswerIndex;
-        });
-      });
-    }
 
     return Scaffold(
       appBar: _buildTestAppBar(session),
@@ -254,22 +241,156 @@ class _TestTakingPageState extends State<TestTakingPage> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              Text(
-                '${_languageCubit.getLocalizedText(korean: '답변 완료', english: 'Answered')}: ${session.answeredQuestionsCount}/${session.totalQuestions}',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: Colors.grey[600],
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '${_languageCubit.getLocalizedText(korean: '답변 완료', english: 'Answered')}: ${session.answeredQuestionsCount}/${session.totalQuestions}',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.onSecondaryContainer,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
+          
+          // Progress bar
           LinearProgressIndicator(
             value: session.progress,
             backgroundColor: Colors.grey[300],
             valueColor: AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
           ),
+          
+          // Question indicators (show for reasonable number of questions)
+          if (session.totalQuestions <= 20) ...[
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              alignment: WrapAlignment.center,
+              children: List.generate(session.totalQuestions, (index) {
+                final isCurrentQuestion = index == session.currentQuestionIndex;
+                final isAnswered = session.isQuestionAnswered(index);
+                
+                return GestureDetector(
+                  onTap: () {
+                    // Allow jumping to any question
+                    setState(() {
+                      _selectedAnswerIndex = null;
+                      _showingExplanation = false;
+                    });
+                    _sessionCubit.goToQuestion(index);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: isCurrentQuestion 
+                          ? theme.colorScheme.primary
+                          : isAnswered 
+                              ? theme.colorScheme.secondary
+                              : Colors.grey[300],
+                      borderRadius: BorderRadius.circular(18),
+                      border: isCurrentQuestion 
+                          ? Border.all(color: theme.colorScheme.primary, width: 3)
+                          : Border.all(color: Colors.transparent, width: 3),
+                      boxShadow: isCurrentQuestion ? [
+                        BoxShadow(
+                          color: theme.colorScheme.primary.withValues(alpha: 0.3),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ] : null,
+                    ),
+                    child: Center(
+                      child: isAnswered && !isCurrentQuestion
+                          ? const Icon(
+                              Icons.check,
+                              size: 18,
+                              color: Colors.white,
+                            )
+                          : Text(
+                              '${index + 1}',
+                              style: TextStyle(
+                                color: isCurrentQuestion || isAnswered 
+                                    ? Colors.white 
+                                    : Colors.black54,
+                                fontWeight: isCurrentQuestion 
+                                    ? FontWeight.bold 
+                                    : FontWeight.w600,
+                                fontSize: 14,
+                              ),
+                            ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 8),
+            
+            // Legend
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildLegendItem(
+                  color: theme.colorScheme.primary,
+                  label: _languageCubit.getLocalizedText(korean: '현재', english: 'Current'),
+                  icon: null,
+                ),
+                const SizedBox(width: 16),
+                _buildLegendItem(
+                  color: theme.colorScheme.secondary,
+                  label: _languageCubit.getLocalizedText(korean: '완료', english: 'Done'),
+                  icon: Icons.check,
+                ),
+                const SizedBox(width: 16),
+                _buildLegendItem(
+                  color: Colors.grey[300]!,
+                  label: _languageCubit.getLocalizedText(korean: '미완료', english: 'Todo'),
+                  icon: null,
+                ),
+              ],
+            ),
+          ],
         ],
       ),
+    );
+  }
+
+  Widget _buildLegendItem({
+    required Color color,
+    required String label,
+    IconData? icon,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 16,
+          height: 16,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: icon != null 
+              ? Icon(icon, size: 10, color: Colors.white)
+              : null,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.grey[600],
+          ),
+        ),
+      ],
     );
   }
 
@@ -302,6 +423,8 @@ class _TestTakingPageState extends State<TestTakingPage> {
   }
 
   Widget _buildQuestionContent(TestSession session, TestQuestion question) {
+    final savedAnswer = session.getAnswerForQuestion(session.currentQuestionIndex);
+    
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -362,32 +485,52 @@ class _TestTakingPageState extends State<TestTakingPage> {
           ...question.options.asMap().entries.map((entry) {
             final index = entry.key;
             final option = entry.value;
-            final isSelected = _selectedAnswerIndex == index;
-            final savedAnswer = session.getAnswerForQuestion(session.currentQuestionIndex);
-            final isAnswered = savedAnswer != null;
-            final isCorrect = index == question.correctAnswerIndex;
+            
+            // Clear logic for different states
+            final isCurrentlySelected = _selectedAnswerIndex == index;
+            final isPreviouslyAnswered = savedAnswer != null && savedAnswer.selectedAnswerIndex == index;
+            final isCorrectAnswer = index == question.correctAnswerIndex;
             
             Color? backgroundColor;
             Color? borderColor;
             Color? textColor;
+            IconData? trailingIcon;
+            Color? trailingIconColor;
             
-            if (_showingExplanation && isAnswered) {
+            // Priority: Explanation mode > Previously answered > Currently selecting
+            if (_showingExplanation && savedAnswer != null) {
+              // Show explanation colors
               if (index == savedAnswer.selectedAnswerIndex) {
                 backgroundColor = savedAnswer.isCorrect 
                     ? Colors.green.withValues(alpha: 0.1) 
                     : Colors.red.withValues(alpha: 0.1);
                 borderColor = savedAnswer.isCorrect ? Colors.green : Colors.red;
                 textColor = savedAnswer.isCorrect ? Colors.green[800] : Colors.red[800];
-              } else if (isCorrect) {
+                trailingIcon = savedAnswer.isCorrect ? Icons.check_circle : Icons.cancel;
+                trailingIconColor = savedAnswer.isCorrect ? Colors.green[600] : Colors.red[600];
+              } else if (isCorrectAnswer) {
                 backgroundColor = Colors.green.withValues(alpha: 0.1);
                 borderColor = Colors.green;
                 textColor = Colors.green[800];
+                trailingIcon = Icons.check_circle;
+                trailingIconColor = Colors.green[600];
               }
-            } else if (isSelected) {
+            } else if (isPreviouslyAnswered) {
+              // Show previously answered state
+              backgroundColor = Theme.of(context).colorScheme.secondary.withValues(alpha: 0.1);
+              borderColor = Theme.of(context).colorScheme.secondary;
+              textColor = Theme.of(context).colorScheme.secondary;
+              trailingIcon = Icons.done;
+              trailingIconColor = Theme.of(context).colorScheme.secondary;
+            } else if (isCurrentlySelected) {
+              // Show current selection
               backgroundColor = Theme.of(context).colorScheme.primary.withValues(alpha: 0.1);
               borderColor = Theme.of(context).colorScheme.primary;
               textColor = Theme.of(context).colorScheme.primary;
             }
+            
+            // Determine if this option should show as "selected" (checked circle)
+            final showAsSelected = isCurrentlySelected || (isPreviouslyAnswered && !_showingExplanation);
             
             return Container(
               margin: const EdgeInsets.only(bottom: 12),
@@ -423,11 +566,11 @@ class _TestTakingPageState extends State<TestTakingPage> {
                               color: textColor ?? Colors.grey,
                               width: 2,
                             ),
-                            color: isSelected && !_showingExplanation
-                                ? Theme.of(context).colorScheme.primary
+                            color: showAsSelected
+                                ? (textColor ?? Theme.of(context).colorScheme.primary)
                                 : Colors.transparent,
                           ),
-                          child: isSelected && !_showingExplanation
+                          child: showAsSelected
                               ? const Icon(Icons.check, size: 16, color: Colors.white)
                               : null,
                         ),
@@ -437,24 +580,22 @@ class _TestTakingPageState extends State<TestTakingPage> {
                             '${String.fromCharCode(65 + index)}. $option',
                             style: TextStyle(
                               fontSize: 16,
-                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                              fontWeight: showAsSelected ? FontWeight.w600 : FontWeight.normal,
                               color: textColor,
                             ),
                           ),
                         ),
-                        if (_showingExplanation && isCorrect)
-                          Icon(Icons.check_circle, color: Colors.green[600], size: 20),
-                        if (_showingExplanation && !isCorrect && index == savedAnswer?.selectedAnswerIndex)
-                          Icon(Icons.cancel, color: Colors.red[600], size: 20),
+                        if (trailingIcon != null)
+                          Icon(trailingIcon, color: trailingIconColor, size: 20),
                       ],
                     ),
                   ),
                 ),
               ),
             );
-          }).toList(),
+          }),
           
-          // Answer button
+          // Answer button - show if we have a current selection and not showing explanation
           if (_selectedAnswerIndex != null && !_showingExplanation)
             Container(
               margin: const EdgeInsets.only(top: 16),
@@ -465,10 +606,28 @@ class _TestTakingPageState extends State<TestTakingPage> {
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
                 child: Text(
-                  _languageCubit.getLocalizedText(
-                    korean: '답안 선택',
-                    english: 'Select Answer',
-                  ),
+                  savedAnswer != null 
+                      ? _languageCubit.getLocalizedText(korean: '답안 변경', english: 'Change Answer')
+                      : _languageCubit.getLocalizedText(korean: '답안 선택', english: 'Select Answer'),
+                ),
+              ),
+            ),
+          
+          // Show explanation button if answered but not showing explanation
+          if (savedAnswer != null && !_showingExplanation && question.explanation != null)
+            Container(
+              margin: const EdgeInsets.only(top: 8),
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _showingExplanation = true;
+                    _selectedAnswerIndex = null;
+                  });
+                },
+                icon: const Icon(Icons.lightbulb_outline),
+                label: Text(
+                  _languageCubit.getLocalizedText(korean: '설명 보기', english: 'Show Explanation'),
                 ),
               ),
             ),
@@ -507,6 +666,17 @@ class _TestTakingPageState extends State<TestTakingPage> {
                     question.explanation!,
                     style: const TextStyle(height: 1.4),
                   ),
+                  const SizedBox(height: 12),
+                  OutlinedButton(
+                    onPressed: () {
+                      setState(() {
+                        _showingExplanation = false;
+                      });
+                    },
+                    child: Text(
+                      _languageCubit.getLocalizedText(korean: '설명 닫기', english: 'Close Explanation'),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -519,7 +689,7 @@ class _TestTakingPageState extends State<TestTakingPage> {
     final theme = Theme.of(context);
     final isFirstQuestion = session.currentQuestionIndex == 0;
     final isLastQuestion = session.currentQuestionIndex == session.totalQuestions - 1;
-    final isAnswered = session.isQuestionAnswered(session.currentQuestionIndex);
+    final allQuestionsAnswered = session.answeredQuestionsCount == session.totalQuestions;
     
     return Container(
       padding: const EdgeInsets.all(16),
@@ -578,6 +748,11 @@ class _TestTakingPageState extends State<TestTakingPage> {
                     ? _languageCubit.getLocalizedText(korean: '시험 완료', english: 'Finish Test')
                     : _languageCubit.getLocalizedText(korean: '다음', english: 'Next'),
               ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: allQuestionsAnswered && isLastQuestion 
+                    ? Colors.green 
+                    : null,
+              ),
             ),
           ),
         ],
@@ -587,11 +762,7 @@ class _TestTakingPageState extends State<TestTakingPage> {
 
   void _answerQuestion() {
     if (_selectedAnswerIndex == null) return;
-    
     _sessionCubit.answerQuestion(_selectedAnswerIndex!);
-    setState(() {
-      _showingExplanation = true;
-    });
   }
 
   void _showExitConfirmation() {
@@ -624,7 +795,7 @@ class _TestTakingPageState extends State<TestTakingPage> {
             onPressed: () {
               Navigator.pop(context);
               _sessionCubit.cancelTest();
-              context.pop();
+              context.go(Routes.tests);
             },
             style: TextButton.styleFrom(
               foregroundColor: Theme.of(context).colorScheme.error,
@@ -642,6 +813,8 @@ class _TestTakingPageState extends State<TestTakingPage> {
   }
 
   void _showFinishConfirmation(TestSession session) {
+    final unansweredCount = session.totalQuestions - session.answeredQuestionsCount;
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -651,11 +824,43 @@ class _TestTakingPageState extends State<TestTakingPage> {
             english: 'Complete Test',
           ),
         ),
-        content: Text(
-          _languageCubit.getLocalizedText(
-            korean: '시험을 완료하시겠습니까? 답안을 제출한 후에는 수정할 수 없습니다.\n\n답변 완료: ${session.answeredQuestionsCount}/${session.totalQuestions}',
-            english: 'Are you ready to complete the test? You cannot change your answers after submission.\n\nAnswered: ${session.answeredQuestionsCount}/${session.totalQuestions}',
-          ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _languageCubit.getLocalizedText(
+                korean: '시험을 완료하시겠습니까? 답안을 제출한 후에는 수정할 수 없습니다.',
+                english: 'Are you ready to complete the test? You cannot change your answers after submission.',
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '${_languageCubit.getLocalizedText(korean: '답변 완료', english: 'Answered')}: ${session.answeredQuestionsCount}/${session.totalQuestions}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            if (unansweredCount > 0) ...[
+              const SizedBox(height: 8),
+              Text(
+                '${_languageCubit.getLocalizedText(korean: '미답변', english: 'Unanswered')}: $unansweredCount',
+                style: TextStyle(
+                  color: Colors.orange[800],
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _languageCubit.getLocalizedText(
+                  korean: '미답변 문제는 0점으로 처리됩니다.',
+                  english: 'Unanswered questions will be marked as incorrect.',
+                ),
+                style: TextStyle(
+                  color: Colors.red[600],
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ],
         ),
         actions: [
           TextButton(
@@ -672,6 +877,9 @@ class _TestTakingPageState extends State<TestTakingPage> {
               Navigator.pop(context);
               _sessionCubit.completeTest();
             },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: unansweredCount > 0 ? Colors.orange : Colors.green,
+            ),
             child: Text(
               _languageCubit.getLocalizedText(
                 korean: '완료',

@@ -140,6 +140,18 @@ class _ProfileSettingsWidgetState extends State<ProfileSettingsWidget> {
               onTap: () => context.push(Routes.userManagement),
             ),
             const SizedBox(height: 8),
+            _buildSettingItem(
+              context: context,
+              icon: Icons.people,
+              label: languageCubit.getLocalizedText(
+                korean: '',
+                english: 'Migration Management',
+                hardWords: [''],
+              ),
+              color: Colors.teal,
+              onTap: () => context.push(Routes.adminMigrationPage),
+            ),
+            const SizedBox(height: 8),
         ],
         // Logout button
         _buildSettingItem(

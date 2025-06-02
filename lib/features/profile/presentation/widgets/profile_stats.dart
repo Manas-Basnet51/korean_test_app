@@ -34,7 +34,7 @@ class ProfileStatsWidget extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.sync_disabled, size: 16, color: Colors.orange),
+                  const Icon(Icons.sync_disabled, size: 16, color: Colors.orange),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(

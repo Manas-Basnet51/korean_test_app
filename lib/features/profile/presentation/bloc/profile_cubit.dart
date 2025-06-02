@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:korean_language_app/core/data/base_state.dart';
 import 'package:korean_language_app/core/errors/api_result.dart';
+import 'package:korean_language_app/core/extensions/api_result_ext.dart';
 import 'package:korean_language_app/features/profile/domain/repositories/profile_repository.dart';
 import 'package:korean_language_app/features/profile/data/models/profile_model.dart';
 part 'profile_state.dart';

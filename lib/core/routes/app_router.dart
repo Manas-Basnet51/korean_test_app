@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:korean_language_app/core/di/di.dart';
 import 'package:korean_language_app/features/admin/presentation/pages/admin_management_page.dart';
 import 'package:korean_language_app/features/admin/presentation/pages/admin_signup_page.dart';
+import 'package:korean_language_app/features/admin/presentation/pages/migration_page.dart';
 import 'package:korean_language_app/features/auth/presentation/pages/forgot_password_page.dart';
 import 'package:korean_language_app/features/auth/presentation/pages/login_page.dart';
 import 'package:korean_language_app/features/auth/presentation/pages/register_page.dart';
@@ -15,7 +16,12 @@ import 'package:korean_language_app/features/book_upload/presentation/pages/uplo
 import 'package:korean_language_app/features/home/presentation/pages/home_page.dart';
 import 'package:korean_language_app/features/profile/presentation/pages/language_preference_page.dart';
 import 'package:korean_language_app/features/profile/presentation/pages/profile_page.dart';
+import 'package:korean_language_app/features/tests/data/models/test_result.dart';
+import 'package:korean_language_app/features/tests/presentation/pages/test_edit_page.dart';
 import 'package:korean_language_app/features/tests/presentation/pages/test_result_page.dart';
+import 'package:korean_language_app/features/tests/presentation/pages/test_results_history_page.dart';
+import 'package:korean_language_app/features/tests/presentation/pages/test_taking_page.dart';
+import 'package:korean_language_app/features/tests/presentation/pages/test_upload_page.dart';
 import 'package:korean_language_app/features/tests/presentation/pages/tests_page.dart';
 import 'package:korean_language_app/features/user_management/presentation/pages/user_management_page.dart';
 import 'package:korean_language_app/core/presentation/widgets/splash/splash_screen.dart';
@@ -46,44 +52,35 @@ class AppRouter {
       final isGoingToAdminSignup = state.matchedLocation == Routes.adminSignup;
       final isGoingToAuth = isGoingToLogin || isGoingToRegister || isGoingToForgotPassword || isGoingToAdminSignup;
       
-      // Always allow access to splash screen
       if (isGoingToSplash) {
         return null;
       }
       
-      // If not logged in, only allow access to auth pages
       if (!isLoggedIn) {
         if (isGoingToAuth) {
-          return null; // Allow access to auth pages
+          return null;
         } else {
-          return Routes.login; // Redirect to login for all other pages
+          return Routes.login;
         }
       }
       
-      // If logged in, don't allow access to auth pages
       if (isLoggedIn && isGoingToAuth) {
-        return Routes.home; // Redirect to home if trying to access auth pages while logged in
+        return Routes.home;
       }
       
-      // Check admin access for admin-only routes
       if (state.matchedLocation == Routes.adminManagement) {
-        // This will be checked inside the page with BlocBuilder
-        // to avoid slowing down navigation with an extra Firestore query
         return null;
       }
       
-      // Logged in user accessing an allowed page
       return null;
     },
     routes: [
-      // Splash screen route
       GoRoute(
         path: '/',
         name: 'splash',
         builder: (context, state) => const SplashScreen(),
       ),
       
-      // Auth routes
       GoRoute(
         path: '/login',
         name: 'login',
@@ -99,34 +96,61 @@ class AppRouter {
         name: 'forgotPassword',
         builder: (context, state) => const ForgotPasswordPage(),
       ),
-      // Main app shell with bottom navigation
+      
       ShellRoute(
         navigatorKey: _shellNavigatorKey,
         builder: (context, state, child) {
           return ScaffoldWithBottomNavBar(child: child);
         },
         routes: [
-          // Home tab
           GoRoute(
             path: '/home',
             name: 'home',
             builder: (context, state) => const HomePage(),
-            routes: const [
-              // Nested routes for home if needed
-            ],
           ),
           
-          // Tests tab
           GoRoute(
             path: '/tests',
             name: 'tests',
             builder: (context, state) => const TestsPage(),
             routes: [
-              //TODO: Implement Routing here
+              GoRoute(
+                path: 'take/:testId',
+                name: 'testTaking',
+                builder: (context, state) {
+                  final testId = state.pathParameters['testId']!;
+                  return TestTakingPage(testId: testId);
+                },
+              ),
+              GoRoute(
+                path: 'upload',
+                name: 'testUpload',
+                builder: (context, state) => const TestUploadPage(),
+              ),
+              GoRoute(
+                path: 'edit/:testId',
+                name: 'testEdit',
+                builder: (context, state) {
+                  final testId = state.pathParameters['testId']!;
+                  return TestEditPage(testId: testId);
+                },
+              ),
+              GoRoute(
+                path: 'results',
+                name: 'testResults',
+                builder: (context, state) => const TestResultsHistoryPage(),
+              ),
+              GoRoute(
+                path: 'result',
+                name: 'testResult',
+                builder: (context, state) {
+                  final result = state.extra as TestResult;
+                  return TestResultPage(result: result);
+                },
+              ),
             ],
           ),
 
-          // Books tab
           GoRoute(
             path: '/books',
             name: 'books',
@@ -164,7 +188,6 @@ class AppRouter {
             ],
           ),
           
-          // Profile tab
           GoRoute(
             path: '/profile',
             name: 'profile',
@@ -184,6 +207,11 @@ class AppRouter {
                     path: 'admin-signup',
                     name: 'adminSignup',
                     builder: (context, state) => const AdminSignupPage(),
+                  ),
+                  GoRoute(
+                    path: 'migration-page',
+                    name: 'migrationPage',
+                    builder: (context, state) => const MigrationPage(),
                   ),
                 ]
               ),
@@ -207,26 +235,29 @@ class Routes {
   static const forgotPassword = '/forgot-password';
   static const home = '/home';
 
-  //Tests
   static const tests = '/tests';
-  static const testsUpload = '/tests/upload';
+  static const testUpload = '/tests/upload';
+  static const testResults = '/tests/results';
+  static const testResult = '/tests/result';
 
-  //Books
   static const books = '/books';
   static const pdfViewer = '/books/pdf-viewer';
   static const uploadBooks = '/books/upload-books';
   static const editBooks = '/books/edit-books';
   static const favoriteBooks = '/books/favorite-books';
 
-  //Profile
   static const profile = '/profile';
   static const languagePreferences = '/profile/language-preferences';
   static const adminManagement = '/profile/admin-management';
+  static const adminMigrationPage = '$adminManagement/migration-page';
   static const adminSignup = '$adminManagement/admin-signup';
   static const userManagement = '/profile/user-management';
+
+  // Helper methods for parameterized routes
+  static String testTaking(String testId) => '/tests/take/$testId';
+  static String testEdit(String testId) => '/tests/edit/$testId';
 }
 
-// Scaffold with bottom navigation bar
 class ScaffoldWithBottomNavBar extends StatelessWidget {
   final Widget child;
   
@@ -237,23 +268,17 @@ class ScaffoldWithBottomNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     
     return Scaffold(
       body: child,
       bottomNavigationBar: BottomNavigationBar(
-       
-        type: BottomNavigationBarType.fixed, //Change type to shifting if needed
-        
+        type: BottomNavigationBarType.fixed,
         backgroundColor: colorScheme.surface,
         selectedItemColor: colorScheme.primary,
-        unselectedItemColor: colorScheme.onSurface.withValues( alpha : 0.6),
-        
-        // Make the labels visible (optional)
+        unselectedItemColor: colorScheme.onSurface.withValues(alpha: 0.6),
         showUnselectedLabels: true,
-        
         currentIndex: _calculateSelectedIndex(context),
         onTap: (index) => _onItemTapped(index, context),
         items: const [

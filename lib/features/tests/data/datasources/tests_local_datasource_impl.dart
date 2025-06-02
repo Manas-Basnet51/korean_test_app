@@ -264,7 +264,7 @@ class TestsLocalDataSourceImpl implements TestsLocalDataSource {
   @override
   Future<TestResult?> getCachedLatestResult(String userId, String testId) async {
     try {
-      final key = '${latestResultPrefix}${userId}_$testId';
+      final key = '$latestResultPrefix${userId}_$testId';
       final jsonString = sharedPreferences.getString(key);
       if (jsonString == null) return null;
       
@@ -280,7 +280,7 @@ class TestsLocalDataSourceImpl implements TestsLocalDataSource {
   Future<void> cacheTestResult(TestResult result) async {
     try {
       // Cache individual result
-      final latestKey = '${latestResultPrefix}${result.userId}_${result.testId}';
+      final latestKey = '$latestResultPrefix${result.userId}_${result.testId}';
       await sharedPreferences.setString(latestKey, json.encode(result.toJson()));
       
       // Add to user results list
@@ -307,7 +307,7 @@ class TestsLocalDataSourceImpl implements TestsLocalDataSource {
       
       // Remove individual latest results for this user
       final keys = sharedPreferences.getKeys();
-      final keysToRemove = keys.where((key) => key.startsWith('${latestResultPrefix}${userId}_'));
+      final keysToRemove = keys.where((key) => key.startsWith('$latestResultPrefix${userId}_'));
       
       for (final key in keysToRemove) {
         await sharedPreferences.remove(key);

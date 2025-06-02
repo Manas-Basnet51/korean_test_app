@@ -11,7 +11,9 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
   final FirebaseFirestore firestore;
   final FirebaseStorage storage;
   final String testsCollection = 'tests';
-  final String resultsCollection = 'test_results';
+  final String resultsCollection = 'test_results'; // Keep for migration
+  final String usersCollection = 'users';
+  final String userResultsSubcollection = 'test_results';
   
   DocumentSnapshot? _lastDocument;
   int? _totalTestsCount;
@@ -378,11 +380,20 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
   @override
   Future<bool> saveTestResult(TestResult result) async {
     try {
+
+      final userResultsRef = firestore
+          .collection(usersCollection)
+          .doc(result.userId)
+          .collection(userResultsSubcollection);
+
       final docRef = result.id.isEmpty 
-          ? firestore.collection(resultsCollection).doc() 
-          : firestore.collection(resultsCollection).doc(result.id);
+          ? userResultsRef.doc() 
+          : userResultsRef.doc(result.id);
       
       final resultData = result.toJson();
+
+      resultData.remove('userId');
+      
       if (result.id.isEmpty) {
         resultData['id'] = docRef.id;
       }
@@ -402,8 +413,10 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
   @override
   Future<List<TestResult>> getUserTestResults(String userId, {int limit = 20}) async {
     try {
-      final querySnapshot = await firestore.collection(resultsCollection)
-          .where('userId', isEqualTo: userId)
+      final querySnapshot = await firestore
+          .collection(usersCollection)
+          .doc(userId)
+          .collection(userResultsSubcollection)
           .orderBy('completedAt', descending: true)
           .limit(limit)
           .get();
@@ -411,6 +424,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       return querySnapshot.docs.map((doc) {
         final data = doc.data();
         data['id'] = doc.id;
+        data['userId'] = userId; // Add back userId for your TestResult model
         return TestResult.fromJson(data);
       }).toList();
     } on FirebaseException catch (e) {
@@ -423,7 +437,8 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
   @override
   Future<List<TestResult>> getTestResults(String testId, {int limit = 50}) async {
     try {
-      final querySnapshot = await firestore.collection(resultsCollection)
+      final querySnapshot = await firestore
+          .collectionGroup(userResultsSubcollection)
           .where('testId', isEqualTo: testId)
           .orderBy('completedAt', descending: true)
           .limit(limit)
@@ -432,6 +447,8 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       return querySnapshot.docs.map((doc) {
         final data = doc.data();
         data['id'] = doc.id;
+        // Extract userId from document path: users/{userId}/test_results/{resultId}
+        data['userId'] = doc.reference.parent.parent!.id;
         return TestResult.fromJson(data);
       }).toList();
     } on FirebaseException catch (e) {
@@ -444,8 +461,10 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
   @override
   Future<TestResult?> getUserLatestResult(String userId, String testId) async {
     try {
-      final querySnapshot = await firestore.collection(resultsCollection)
-          .where('userId', isEqualTo: userId)
+      final querySnapshot = await firestore
+          .collection(usersCollection)
+          .doc(userId)
+          .collection(userResultsSubcollection)
           .where('testId', isEqualTo: testId)
           .orderBy('completedAt', descending: true)
           .limit(1)
@@ -457,6 +476,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       
       final data = querySnapshot.docs.first.data();
       data['id'] = querySnapshot.docs.first.id;
+      data['userId'] = userId;
       
       return TestResult.fromJson(data);
     } on FirebaseException catch (e) {

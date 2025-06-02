@@ -57,7 +57,7 @@ class _ProfileHeaderWidgetState extends State<ProfileHeaderWidget> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.cloud_off, size: 16, color: Colors.orange),
+                  const Icon(Icons.cloud_off, size: 16, color: Colors.orange),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -287,7 +287,7 @@ class _ProfileHeaderWidgetState extends State<ProfileHeaderWidget> {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
+          const Icon(
             Icons.check_circle,
             size: 12,
             color: Colors.green,

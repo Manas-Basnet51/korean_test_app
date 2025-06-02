@@ -3,6 +3,7 @@ import 'dart:developer' as dev;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:korean_language_app/core/data/base_state.dart';
 import 'package:korean_language_app/core/errors/api_result.dart';
+import 'package:korean_language_app/core/extensions/api_result_ext.dart';
 import 'package:korean_language_app/features/auth/domain/entities/user.dart';
 import 'package:korean_language_app/features/auth/presentation/bloc/auth_cubit.dart';
 import 'package:korean_language_app/features/tests/data/models/test_answer.dart';
@@ -28,7 +29,7 @@ class TestSessionCubit extends Cubit<TestSessionState> {
     try {
       final user = _getCurrentUser();
       if (user == null) {
-        emit(TestSessionError('User not authenticated', FailureType.auth));
+        emit(const TestSessionError('User not authenticated', FailureType.auth));
         return;
       }
 
@@ -201,7 +202,7 @@ class TestSessionCubit extends Cubit<TestSessionState> {
     if (currentState is! TestSessionInProgress) return;
 
     try {
-      emit(TestSessionSubmitting());
+      emit(const TestSessionSubmitting());
       
       _testTimer?.cancel();
       _questionTimer?.cancel();

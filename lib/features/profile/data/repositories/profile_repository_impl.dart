@@ -97,7 +97,7 @@ class ProfileRepositoryImpl extends BaseRepository implements ProfileRepository 
         dev.log('Failed to update cache: $e');
       }
 
-      return null;
+      return;
     });
   }
 

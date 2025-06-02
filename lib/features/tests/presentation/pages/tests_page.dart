@@ -36,7 +36,7 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
   void initState() {
     super.initState();
     _tabController = TabController(
-      length: TestCategory.values.length - 1, // Exclude 'all' category
+      length: TestCategory.values.length - 1,
       vsync: this,
     );
     
@@ -156,13 +156,13 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
         },
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push('/tests/upload'),
+        onPressed: () => context.push(Routes.testUpload),
         tooltip: _languageCubit.getLocalizedText(
           korean: '시험 만들기',
           english: 'Create Test',
         ),
         child: const Icon(Icons.add),
-      ),
+      )
     );
   }
   
@@ -187,7 +187,7 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
         IconButton(
           icon: const Icon(Icons.history),
           onPressed: () {
-            context.push('/tests/results'); 
+            context.push(Routes.testResults);
           },
           tooltip: _languageCubit.getLocalizedText(
             korean: '내 결과',
@@ -197,7 +197,6 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
       ],
     );
   }
-  
   Widget _buildCategoryTabs(ThemeData theme) {
     return Container(
       decoration: BoxDecoration(
@@ -441,7 +440,6 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
   }
   
   void _showSearchDelegate() {
-    // TODO: Implement search delegate similar to books
     _snackBarCubit.showInfoLocalized(
       korean: '검색 기능이 곧 제공될 예정입니다',
       english: 'Search functionality coming soon',
@@ -449,7 +447,15 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
   }
   
   void _startTest(TestItem test) {
-    context.push('/tests/take/${test.id}');
+    // Check if test.id is not empty before navigation
+    if (test.id.isEmpty) {
+      _snackBarCubit.showErrorLocalized(
+        korean: '시험 ID가 유효하지 않습니다',
+        english: 'Invalid test ID',
+      );
+      return;
+    }
+    context.push(Routes.testTaking(test.id));
   }
   
   void _viewTestDetails(TestItem test) {
@@ -645,6 +651,15 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
   }
   
   void _editTest(TestItem test) async {
+    // Check if test.id is not empty before checking permissions
+    if (test.id.isEmpty) {
+      _snackBarCubit.showErrorLocalized(
+        korean: '시험 ID가 유효하지 않습니다',
+        english: 'Invalid test ID',
+      );
+      return;
+    }
+
     final hasPermission = await _testsCubit.canUserEditTest(test.id);
     if (!hasPermission) {
       _snackBarCubit.showErrorLocalized(
@@ -654,7 +669,7 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
       return;
     }
 
-    final result = await context.push('/tests/edit/${test.id}');
+    final result = await context.push(Routes.testEdit(test.id)); // Updated to use Routes
 
     if (result == true) {
       _refreshData();
@@ -714,11 +729,23 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
     ) ?? false;
 
     if (confirmed) {
-      // TODO: Implement delete functionality
-      _snackBarCubit.showInfoLocalized(
-        korean: '삭제 기능이 곧 제공될 예정입니다',
-        english: 'Delete functionality coming soon',
-      );
+      // Delete test using TestsCubit
+      final success = await _testsCubit.deleteExistingTest(test.id);
+      
+      if (success) {
+        _snackBarCubit.showSuccessLocalized(
+          korean: '시험이 성공적으로 삭제되었습니다',
+          english: 'Test deleted successfully',
+        );
+        
+        // Refresh the test list
+        _refreshData();
+      } else {
+        _snackBarCubit.showErrorLocalized(
+          korean: '시험 삭제에 실패했습니다',
+          english: 'Failed to delete test',
+        );
+      }
     }
   }
 }

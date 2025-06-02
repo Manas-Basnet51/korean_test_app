@@ -149,7 +149,7 @@ class TestSessionSubmitting extends TestSessionState {
     String? error,
     FailureType? errorType,
   }) {
-    return TestSessionSubmitting();
+    return const TestSessionSubmitting();
   }
 
   @override
@@ -175,7 +175,7 @@ class TestSessionCompleted extends TestSessionState {
 }
 
 class TestSessionError extends TestSessionState {
-  TestSessionError(String message, FailureType errorType)
+  const TestSessionError(String message, FailureType errorType)
       : super(error: message, errorType: errorType);
 
   @override

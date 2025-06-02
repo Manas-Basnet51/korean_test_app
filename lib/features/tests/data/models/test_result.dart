@@ -69,7 +69,7 @@ class TestResult extends Equatable {
     final duration = totalDuration;
     final minutes = duration.inMinutes;
     final seconds = duration.inSeconds % 60;
-    return '${minutes}분 ${seconds}초';
+    return '$minutes분 $seconds초';
   }
 
   String get formattedScore => '$score%';
