@@ -11,7 +11,6 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
   final FirebaseFirestore firestore;
   final FirebaseStorage storage;
   final String testsCollection = 'tests';
-  final String resultsCollection = 'test_results'; // Keep for migration
   final String usersCollection = 'users';
   final String userResultsSubcollection = 'test_results';
   
@@ -266,16 +265,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       await _deleteAssociatedFiles(data);
       await docRef.delete();
       
-      // Also delete all related test results
-      final resultsSnapshot = await firestore.collection(resultsCollection)
-          .where('testId', isEqualTo: testId)
-          .get();
-      
-      final batch = firestore.batch();
-      for (final resultDoc in resultsSnapshot.docs) {
-        batch.delete(resultDoc.reference);
-      }
-      await batch.commit();
+      // Maybe delete all test related results?
       
       if (_totalTestsCount != null && _totalTestsCount! > 0) {
         _totalTestsCount = _totalTestsCount! - 1;
