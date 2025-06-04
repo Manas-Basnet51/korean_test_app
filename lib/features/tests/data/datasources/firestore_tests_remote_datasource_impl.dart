@@ -191,7 +191,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
   }
 
   @override
-  Future<bool> uploadTest(TestItem test) async {
+  Future<TestItem> uploadTest(TestItem test) async {
     try {
       if (test.title.isEmpty || test.description.isEmpty || test.questions.isEmpty) {
         throw ArgumentError('Test title, description, and questions cannot be empty');
@@ -217,13 +217,19 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
         _totalTestsCount = (_totalTestsCount ?? 0) + 1;
       }
       
-      return true;
+      // Return the updated TestItem with the correct ID
+      return test.copyWith(
+        id: docRef.id,
+        createdAt: DateTime.now(), // Since we can't get the server timestamp immediately
+        updatedAt: DateTime.now(),
+      );
     } on FirebaseException catch (e) {
       throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to upload test: $e');
     }
   }
+
 
   @override
   Future<bool> updateTest(String testId, TestItem updatedTest) async {

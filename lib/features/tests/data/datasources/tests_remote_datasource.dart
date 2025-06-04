@@ -9,7 +9,7 @@ abstract class TestsRemoteDataSource {
   Future<bool> hasMoreTests(int currentCount);
   Future<List<TestItem>> searchTests(String query);
   Future<TestItem?> getTestById(String testId);
-  Future<bool> uploadTest(TestItem test);
+  Future<TestItem> uploadTest(TestItem test);
   Future<bool> updateTest(String testId, TestItem updatedTest);
   Future<bool> deleteTest(String testId);
   Future<(String, String)?> uploadTestImage(String testId, File imageFile);

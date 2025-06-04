@@ -16,7 +16,7 @@ abstract class TestsRepository {
   Future<ApiResult<TestItem?>> getTestById(String testId);
   
   // Test CRUD operations (admin)
-  Future<ApiResult<bool>> createTest(TestItem test);
+  Future<ApiResult<TestItem>> createTest(TestItem test);
   Future<ApiResult<bool>> updateTest(String testId, TestItem updatedTest);
   Future<ApiResult<bool>> deleteTest(String testId);
   Future<ApiResult<String?>> uploadTestImage(String testId, File imageFile);

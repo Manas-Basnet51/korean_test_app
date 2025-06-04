@@ -481,25 +481,15 @@ class TestsCubit extends Cubit<TestsState> {
       final result = await repository.createTest(test);
 
       result.fold(
-        onSuccess: (success) {
-          if (success) {
-            addTestToState(test);
-            emit(state.copyWith(
-              currentOperation: const TestsOperation(
-                type: TestsOperationType.createTest,
-                status: TestsOperationStatus.completed,
-              ),
-            ));
-            dev.log('Test created successfully: ${test.title}');
-          } else {
-            emit(state.copyWithBaseState(
-              error: 'Failed to create test',
-            ).copyWithOperation(const TestsOperation(
+        onSuccess: (updatedTest) {
+          addTestToState(updatedTest);
+          emit(state.copyWith(
+            currentOperation: const TestsOperation(
               type: TestsOperationType.createTest,
-              status: TestsOperationStatus.failed,
-              message: 'Failed to create test',
-            )));
-          }
+              status: TestsOperationStatus.completed,
+            ),
+          ));
+          dev.log('Test created successfully: ${updatedTest.title} with ID: ${updatedTest.id}');
           _clearOperationAfterDelay();
         },
         onFailure: (message, type) {

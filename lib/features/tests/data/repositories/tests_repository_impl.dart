@@ -188,25 +188,23 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
 
   // Test CRUD operations
   @override
-  Future<ApiResult<bool>> createTest(TestItem test) async {
+  Future<ApiResult<TestItem>> createTest(TestItem test) async {
     if (!await networkInfo.isConnected) {
       return ApiResult.failure('No internet connection', FailureType.network);
     }
 
     return _executeWithRetry(() async {
-      final success = await remoteDataSource.uploadTest(test);
+      final updatedTest = await remoteDataSource.uploadTest(test);
       
-      if (success) {
-        try {
-          await localDataSource.addTest(test);
-          await _updateTestHash(test);
-          await _updateLastSyncTime();
-        } catch (e) {
-          dev.log('Failed to cache after create: $e');
-        }
+      try {
+        await localDataSource.addTest(updatedTest);
+        await _updateTestHash(updatedTest);
+        await _updateLastSyncTime();
+      } catch (e) {
+        dev.log('Failed to cache after create: $e');
       }
       
-      return success;
+      return updatedTest;
     });
   }
 

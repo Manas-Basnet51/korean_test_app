@@ -32,15 +32,24 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
   LanguagePreferenceCubit get _languageCubit => context.read<LanguagePreferenceCubit>();
   SnackBarCubit get _snackBarCubit => context.read<SnackBarCubit>();
   
+  // Define tab order with 'all' first
+  List<TestCategory> get _tabCategories => [
+    TestCategory.all,
+    TestCategory.practice,
+    TestCategory.topikI,
+    TestCategory.topikII,
+  ];
+  
   @override
   void initState() {
     super.initState();
     _tabController = TabController(
-      length: TestCategory.values.length - 1,
+      length: _tabCategories.length,
       vsync: this,
     );
     
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Load initial tests (all category) since first tab is "All"
       _testsCubit.loadInitialTests();
       context.read<ConnectivityCubit>().checkConnectivity();
       setState(() {
@@ -111,11 +120,10 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
   }
 
   TestCategory _getCategoryForIndex(int index) {
-    final categories = TestCategory.values.where((c) => c != TestCategory.all).toList();
-    if (index >= 0 && index < categories.length) {
-      return categories[index];
+    if (index >= 0 && index < _tabCategories.length) {
+      return _tabCategories[index];
     }
-    return TestCategory.practice;
+    return TestCategory.all;
   }
 
   @override
@@ -197,6 +205,7 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
       ],
     );
   }
+
   Widget _buildCategoryTabs(ThemeData theme) {
     return Container(
       decoration: BoxDecoration(
@@ -219,13 +228,12 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
         ),
         unselectedLabelStyle: theme.textTheme.titleSmall,
         indicatorColor: theme.colorScheme.primary,
-        tabs: TestCategory.values
-            .where((category) => category != TestCategory.all)
+        tabs: _tabCategories
             .map((category) => Tab(
                   child: Text(
                     _languageCubit.getLocalizedText(
                       korean: _getCategoryNameKorean(category),
-                      english: category.name,
+                      english: _getCategoryNameEnglish(category),
                     ),
                   ),
                 ))
@@ -236,14 +244,27 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
 
   String _getCategoryNameKorean(TestCategory category) {
     switch (category) {
+      case TestCategory.all:
+        return '전체';
+      case TestCategory.practice:
+        return '연습';
       case TestCategory.topikI:
         return 'TOPIK I';
       case TestCategory.topikII:
         return 'TOPIK II';
-      case TestCategory.practice:
-        return '연습';
+    }
+  }
+
+  String _getCategoryNameEnglish(TestCategory category) {
+    switch (category) {
       case TestCategory.all:
-        return '전체';
+        return 'All';
+      case TestCategory.practice:
+        return 'Practice';
+      case TestCategory.topikI:
+        return 'TOPIK I';
+      case TestCategory.topikII:
+        return 'TOPIK II';
     }
   }
   
@@ -293,7 +314,13 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
             onRetry: () {
               context.read<ConnectivityCubit>().checkConnectivity();
               if (context.read<ConnectivityCubit>().state is ConnectivityConnected) {
-                _testsCubit.loadInitialTests();
+                // Load based on current tab
+                final currentCategory = _getCategoryForIndex(_tabController.index);
+                if (currentCategory == TestCategory.all) {
+                  _testsCubit.loadInitialTests();
+                } else {
+                  _testsCubit.loadTestsByCategory(currentCategory);
+                }
               }
             },
           );
@@ -308,7 +335,13 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
             message: state.error ?? '',
             errorType: state.errorType,
             onRetry: () {
-              _testsCubit.loadInitialTests();
+              // Load based on current tab
+              final currentCategory = _getCategoryForIndex(_tabController.index);
+              if (currentCategory == TestCategory.all) {
+                _testsCubit.loadInitialTests();
+              } else {
+                _testsCubit.loadTestsByCategory(currentCategory);
+              }
             },
           );
         }
@@ -335,7 +368,13 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
               message: state.error ?? '',
               errorType: state.errorType,
               onRetry: () {
-                _testsCubit.loadInitialTests();
+                // Load based on current tab
+                final currentCategory = _getCategoryForIndex(_tabController.index);
+                if (currentCategory == TestCategory.all) {
+                  _testsCubit.loadInitialTests();
+                } else {
+                  _testsCubit.loadTestsByCategory(currentCategory);
+                }
               },
               isCompact: true,
             ),
@@ -669,7 +708,7 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
       return;
     }
 
-    final result = await context.push(Routes.testEdit(test.id)); // Updated to use Routes
+    final result = await context.push(Routes.testEdit(test.id));
 
     if (result == true) {
       _refreshData();
@@ -729,7 +768,6 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
     ) ?? false;
 
     if (confirmed) {
-      // Delete test using TestsCubit
       final success = await _testsCubit.deleteExistingTest(test.id);
       
       if (success) {
@@ -738,7 +776,6 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
           english: 'Test deleted successfully',
         );
         
-        // Refresh the test list
         _refreshData();
       } else {
         _snackBarCubit.showErrorLocalized(
