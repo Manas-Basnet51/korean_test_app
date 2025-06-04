@@ -23,7 +23,8 @@ class TestsPage extends StatefulWidget {
 
 class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final _scrollController = ScrollController();
+  late PageController _pageController;
+  final List<ScrollController> _scrollControllers = [];
   bool _isRefreshing = false;
   final Map<String, bool> _editPermissionCache = {};
   bool _isInitialized = false;
@@ -32,7 +33,6 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
   LanguagePreferenceCubit get _languageCubit => context.read<LanguagePreferenceCubit>();
   SnackBarCubit get _snackBarCubit => context.read<SnackBarCubit>();
   
-  // Define tab order with 'all' first
   List<TestCategory> get _tabCategories => [
     TestCategory.all,
     TestCategory.practice,
@@ -48,8 +48,14 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
       vsync: this,
     );
     
+    _pageController = PageController();
+    
+    // Initialize scroll controllers for each tab
+    for (int i = 0; i < _tabCategories.length; i++) {
+      _scrollControllers.add(ScrollController());
+    }
+    
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Load initial tests (all category) since first tab is "All"
       _testsCubit.loadInitialTests();
       context.read<ConnectivityCubit>().checkConnectivity();
       setState(() {
@@ -57,19 +63,28 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
       });
     });
     
-    _scrollController.addListener(_onScroll);
+    // Add scroll listeners to all controllers
+    for (int i = 0; i < _scrollControllers.length; i++) {
+      _scrollControllers[i].addListener(() => _onScroll(i));
+    }
+    
     _tabController.addListener(_onTabChanged);
   }
   
   @override
   void dispose() {
     _tabController.dispose();
-    _scrollController.dispose();
+    _pageController.dispose();
+    for (final controller in _scrollControllers) {
+      controller.dispose();
+    }
     super.dispose();
   }
   
-  void _onScroll() {
-    if (_isNearBottom && !_isRefreshing) {
+  void _onScroll(int tabIndex) {
+    if (!_scrollControllers[tabIndex].hasClients || _isRefreshing) return;
+    
+    if (_isNearBottom(tabIndex)) {
       final state = _testsCubit.state;
       
       if (state.hasMore && !state.currentOperation.isInProgress) {
@@ -81,7 +96,25 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
   void _onTabChanged() {
     if (!_tabController.indexIsChanging) return;
     
-    final category = _getCategoryForIndex(_tabController.index);
+    final newIndex = _tabController.index;
+    _pageController.animateToPage(
+      newIndex,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+    
+    _loadTestsForTab(newIndex);
+  }
+
+  void _onPageChanged(int index) {
+    if (_tabController.index != index) {
+      _tabController.animateTo(index);
+    }
+    _loadTestsForTab(index);
+  }
+
+  void _loadTestsForTab(int index) {
+    final category = _getCategoryForIndex(index);
     if (category == TestCategory.all) {
       _testsCubit.loadInitialTests();
     } else {
@@ -90,11 +123,11 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
     _editPermissionCache.clear();
   }
   
-  bool get _isNearBottom {
-    if (!_scrollController.hasClients) return false;
+  bool _isNearBottom(int tabIndex) {
+    if (!_scrollControllers[tabIndex].hasClients) return false;
     
-    final maxScroll = _scrollController.position.maxScrollExtent;
-    final currentScroll = _scrollController.offset;
+    final maxScroll = _scrollControllers[tabIndex].position.maxScrollExtent;
+    final currentScroll = _scrollControllers[tabIndex].offset;
     return currentScroll >= (maxScroll * 0.9);
   }
   
@@ -157,7 +190,7 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
               
               _buildCategoryTabs(theme),
               Expanded(
-                child: _buildTestsContent(isOffline),
+                child: _buildTabContent(isOffline),
               ),
             ],
           );
@@ -242,6 +275,82 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
     );
   }
 
+  Widget _buildTabContent(bool isOffline) {
+    return PageView.builder(
+      controller: _pageController,
+      onPageChanged: _onPageChanged,
+      itemCount: _tabCategories.length,
+      itemBuilder: (context, index) {
+        return BlocConsumer<TestsCubit, TestsState>(
+          listener: (context, state) {
+            final operation = state.currentOperation;
+            
+            if (operation.status == TestsOperationStatus.failed) {
+              String errorMessage = operation.message ?? 'Operation failed';
+              
+              switch (operation.type) {
+                case TestsOperationType.loadTests:
+                  errorMessage = 'Failed to load tests';
+                  break;
+                case TestsOperationType.loadMoreTests:
+                  errorMessage = 'Failed to load more tests';
+                  break;
+                case TestsOperationType.searchTests:
+                  errorMessage = 'Failed to search tests';
+                  break;
+                case TestsOperationType.refreshTests:
+                  errorMessage = 'Failed to refresh tests';
+                  break;
+                default:
+                  break;
+              }
+              
+              _snackBarCubit.showErrorLocalized(
+                korean: errorMessage,
+                english: errorMessage,
+              );
+            }
+            
+            if (state.hasError) {
+              _snackBarCubit.showErrorLocalized(
+                korean: state.error ?? '오류가 발생했습니다.',
+                english: state.error ?? 'An error occurred.',
+              );
+            }
+          },
+          builder: (context, state) {
+            if (isOffline && state.tests.isEmpty && state.isLoading) {
+              return ErrorView(
+                message: '',
+                errorType: FailureType.network,
+                onRetry: () {
+                  context.read<ConnectivityCubit>().checkConnectivity();
+                  if (context.read<ConnectivityCubit>().state is ConnectivityConnected) {
+                    _loadTestsForTab(_tabController.index);
+                  }
+                },
+              );
+            }
+            
+            if (state.isLoading && state.tests.isEmpty) {
+              return const TestGridSkeleton();
+            }
+            
+            if (state.hasError && state.tests.isEmpty) {
+              return ErrorView(
+                message: state.error ?? '',
+                errorType: state.errorType,
+                onRetry: () => _loadTestsForTab(_tabController.index),
+              );
+            }
+            
+            return _buildTestsList(state, isOffline, index);
+          },
+        );
+      },
+    );
+  }
+
   String _getCategoryNameKorean(TestCategory category) {
     switch (category) {
       case TestCategory.all:
@@ -268,90 +377,7 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
     }
   }
   
-  Widget _buildTestsContent(bool isOffline) {
-    return BlocConsumer<TestsCubit, TestsState>(
-      listener: (context, state) {
-        final operation = state.currentOperation;
-        
-        if (operation.status == TestsOperationStatus.failed) {
-          String errorMessage = operation.message ?? 'Operation failed';
-          
-          switch (operation.type) {
-            case TestsOperationType.loadTests:
-              errorMessage = 'Failed to load tests';
-              break;
-            case TestsOperationType.loadMoreTests:
-              errorMessage = 'Failed to load more tests';
-              break;
-            case TestsOperationType.searchTests:
-              errorMessage = 'Failed to search tests';
-              break;
-            case TestsOperationType.refreshTests:
-              errorMessage = 'Failed to refresh tests';
-              break;
-            default:
-              break;
-          }
-          
-          _snackBarCubit.showErrorLocalized(
-            korean: errorMessage,
-            english: errorMessage,
-          );
-        }
-        
-        if (state.hasError) {
-          _snackBarCubit.showErrorLocalized(
-            korean: state.error ?? '오류가 발생했습니다.',
-            english: state.error ?? 'An error occurred.',
-          );
-        }
-      },
-      builder: (context, state) {
-        if (isOffline && state.tests.isEmpty && state.isLoading) {
-          return ErrorView(
-            message: '',
-            errorType: FailureType.network,
-            onRetry: () {
-              context.read<ConnectivityCubit>().checkConnectivity();
-              if (context.read<ConnectivityCubit>().state is ConnectivityConnected) {
-                // Load based on current tab
-                final currentCategory = _getCategoryForIndex(_tabController.index);
-                if (currentCategory == TestCategory.all) {
-                  _testsCubit.loadInitialTests();
-                } else {
-                  _testsCubit.loadTestsByCategory(currentCategory);
-                }
-              }
-            },
-          );
-        }
-        
-        if (state.isLoading && state.tests.isEmpty) {
-          return const TestGridSkeleton();
-        }
-        
-        if (state.hasError && state.tests.isEmpty) {
-          return ErrorView(
-            message: state.error ?? '',
-            errorType: state.errorType,
-            onRetry: () {
-              // Load based on current tab
-              final currentCategory = _getCategoryForIndex(_tabController.index);
-              if (currentCategory == TestCategory.all) {
-                _testsCubit.loadInitialTests();
-              } else {
-                _testsCubit.loadTestsByCategory(currentCategory);
-              }
-            },
-          );
-        }
-        
-        return _buildTestsList(state, isOffline);
-      },
-    );
-  }
-  
-  Widget _buildTestsList(TestsState state, bool isOffline) {
+  Widget _buildTestsList(TestsState state, bool isOffline, int tabIndex) {
     if (state.tests.isEmpty) {
       return _buildEmptyTestsView();
     }
@@ -367,15 +393,7 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
             ErrorView(
               message: state.error ?? '',
               errorType: state.errorType,
-              onRetry: () {
-                // Load based on current tab
-                final currentCategory = _getCategoryForIndex(_tabController.index);
-                if (currentCategory == TestCategory.all) {
-                  _testsCubit.loadInitialTests();
-                } else {
-                  _testsCubit.loadTestsByCategory(currentCategory);
-                }
-              },
+              onRetry: () => _loadTestsForTab(_tabController.index),
               isCompact: true,
             ),
           
@@ -383,7 +401,7 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
             child: Stack(
               children: [
                 GridView.builder(
-                  controller: _scrollController,
+                  controller: _scrollControllers[tabIndex],
                   padding: const EdgeInsets.all(16),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
@@ -400,7 +418,7 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
                         final canEdit = snapshot.data ?? false;
                         
                         return TestCard(
-                          key: ValueKey(test.id),
+                          key: ValueKey('${test.id}_$tabIndex'),
                           test: test,
                           canEdit: canEdit,
                           onTap: () => _startTest(test),
@@ -486,7 +504,6 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
   }
   
   void _startTest(TestItem test) {
-    // Check if test.id is not empty before navigation
     if (test.id.isEmpty) {
       _snackBarCubit.showErrorLocalized(
         korean: '시험 ID가 유효하지 않습니다',
@@ -690,7 +707,6 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
   }
   
   void _editTest(TestItem test) async {
-    // Check if test.id is not empty before checking permissions
     if (test.id.isEmpty) {
       _snackBarCubit.showErrorLocalized(
         korean: '시험 ID가 유효하지 않습니다',

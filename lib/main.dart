@@ -19,12 +19,12 @@ import 'package:korean_language_app/core/presentation/snackbar/widgets/snackbar_
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   await initializeFirebase();
 
-  // debugRepaintRainbowEnabled = true; // Good for checking repaints caused by rendering 
+  // debugRepaintRainbowEnabled = true; // Good for checking repaints caused by rendering
   await di.init();
-  
+
   runApp(const MyApp());
 }
 
@@ -61,30 +61,40 @@ class MyApp extends StatelessWidget {
         ...TestsProviders.getProviders(),
         // Add other BLoC providers here
       ],
-      child: BlocBuilder<ThemeCubit, ThemeMode>(
-        builder: (context, themeMode) {
-          return MaterialApp.router(
-            title: 'Korean Test App',
-            theme: AppTheme.lightTheme,
-            darkTheme: AppTheme.darkTheme,
-            themeMode: themeMode,
-            routerConfig: AppRouter.router,
-            debugShowCheckedModeBanner: false,
-            builder: (context, child) {
-              return SnackBarWidget(
-                child: child ?? const SizedBox(),
-              );
-            },
-          );
+      child: BlocListener<AuthCubit, AuthState>(
+        listenWhen: (previous, current) {
+          return (previous.runtimeType != current.runtimeType) &&
+                (current is Authenticated || 
+                  current is Unauthenticated || 
+                  current is AuthAnonymousSignIn ||
+                  current is AuthLoading);
         },
+        listener: (context, state) {
+          AppRouter.router.refresh();
+        },
+        child: BlocBuilder<ThemeCubit, ThemeMode>(
+          builder: (context, themeMode) {
+            return MaterialApp.router(
+              title: 'Korean Test App',
+              theme: AppTheme.lightTheme,
+              darkTheme: AppTheme.darkTheme,
+              themeMode: themeMode,
+              routerConfig: AppRouter.router,
+              debugShowCheckedModeBanner: false,
+              builder: (context, child) {
+                return SnackBarWidget(
+                  child: child ?? const SizedBox(),
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }
 }
 
 Future<void> initializeFirebase() async {
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   //Appchecks or storage checks
 }

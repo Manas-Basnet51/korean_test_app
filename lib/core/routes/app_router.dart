@@ -1,10 +1,10 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import 'package:korean_language_app/core/di/di.dart';
 import 'package:korean_language_app/features/admin/presentation/pages/admin_management_page.dart';
 import 'package:korean_language_app/features/admin/presentation/pages/admin_signup_page.dart';
 import 'package:korean_language_app/features/admin/presentation/pages/migration_page.dart';
+import 'package:korean_language_app/features/auth/presentation/bloc/auth_cubit.dart';
 import 'package:korean_language_app/features/auth/presentation/pages/forgot_password_page.dart';
 import 'package:korean_language_app/features/auth/presentation/pages/login_page.dart';
 import 'package:korean_language_app/features/auth/presentation/pages/register_page.dart';
@@ -43,33 +43,46 @@ class AppRouter {
     navigatorKey: _rootNavigatorKey,
     debugLogDiagnostics: true,
     redirect: (context, state) {
-      final firebaseAuth = sl<FirebaseAuth>();
-      final isLoggedIn = firebaseAuth.currentUser != null;
+      final authCubit = context.read<AuthCubit>();
+      final authState = authCubit.state;
+      
+      // auth initial state
+      if (authState is AuthInitial) {
+        return Routes.splash;
+      }
+      
+      final isLoggedIn = authState is Authenticated || authState is AuthAnonymousSignIn;
+      
+      // auth loading state
+      if (authState is AuthLoading) {
+        final isGoingToSplash = state.matchedLocation == Routes.splash;
+        return isGoingToSplash ? null : Routes.splash;
+      }
+      
+      // auth error state
+      if (authState is AuthError) {
+        final isGoingToAuth = [Routes.login, Routes.register, Routes.forgotPassword, Routes.adminSignup]
+            .contains(state.matchedLocation);
+        return isGoingToAuth ? null : Routes.login;
+      }
+      
       final isGoingToLogin = state.matchedLocation == Routes.login;
       final isGoingToRegister = state.matchedLocation == Routes.register;
       final isGoingToForgotPassword = state.matchedLocation == Routes.forgotPassword;
       final isGoingToSplash = state.matchedLocation == Routes.splash;
-      final isGoingToAdminSignup = state.matchedLocation == Routes.adminSignup;
+      final isGoingToAdminSignup = state.matchedLocation == Routes.adminManagement + Routes.adminSignup;
       final isGoingToAuth = isGoingToLogin || isGoingToRegister || isGoingToForgotPassword || isGoingToAdminSignup;
       
-      if (isGoingToSplash) {
-        return null;
+      if (isGoingToSplash && authState is! AuthLoading) {
+        return isLoggedIn ? Routes.home : Routes.login;
       }
       
       if (!isLoggedIn) {
-        if (isGoingToAuth) {
-          return null;
-        } else {
-          return Routes.login;
-        }
+        return isGoingToAuth ? null : Routes.login;
       }
       
       if (isLoggedIn && isGoingToAuth) {
         return Routes.home;
-      }
-      
-      if (state.matchedLocation == Routes.adminManagement) {
-        return null;
       }
       
       return null;

@@ -17,7 +17,6 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   final TestsLocalDataSource localDataSource;
   final AdminPermissionService adminService;
   
-  // Caching configuration
   static const Duration cacheValidityDuration = Duration(hours: 2);
   static const int maxRetries = 3;
   static const Duration initialRetryDelay = Duration(seconds: 1);
@@ -32,7 +31,6 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   @override
   Future<ApiResult<List<TestItem>>> getTests({int page = 0, int pageSize = 5}) async {
     return _executeWithRetry(() async {
-      // For pagination beyond first page, always fetch from remote
       if (page > 0) {
         if (!await networkInfo.isConnected) {
           throw Exception('No internet connection for pagination');
@@ -40,7 +38,6 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
         return await remoteDataSource.getTests(page: page, pageSize: pageSize);
       }
 
-      // Check cache validity for first page
       if (await _isCacheValid()) {
         final cachedTests = await localDataSource.getAllTests();
         if (cachedTests.isNotEmpty && _areValidTests(cachedTests)) {
@@ -49,7 +46,6 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
         }
       }
 
-      // Fetch from remote and cache
       return await _fetchAndCacheTests(pageSize: pageSize);
     });
   }
@@ -57,16 +53,23 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   @override
   Future<ApiResult<List<TestItem>>> getTestsByCategory(TestCategory category, {int page = 0, int pageSize = 5}) async {
     return _executeWithRetry(() async {
-      if (!await networkInfo.isConnected) {
-        // Try to return cached data filtered by category
+
+      if(page > 0) {
+        if (!await networkInfo.isConnected) {
+          throw Exception('No internet connection for pagination');
+        }
+        return await remoteDataSource.getTestsByCategory(category, page: page, pageSize: pageSize);
+      }
+
+      if(await _isCacheValid()) {
         final cachedTests = await localDataSource.getAllTests();
         final filteredTests = cachedTests.where((test) => test.category == category).toList();
-        return _filterValidTests(filteredTests);
+        final validTests =_filterValidTests(filteredTests);
+        return validTests;
       }
 
       final remoteTests = await remoteDataSource.getTestsByCategory(category, page: page, pageSize: pageSize);
       
-      // Update cache with new tests
       if (remoteTests.isNotEmpty) {
         await _updateCacheWithNewTests(remoteTests);
       }
@@ -103,10 +106,44 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   }
 
   @override
+  Future<ApiResult<bool>> hasMoreTestsByCategory(TestCategory category, int currentCount) async {
+    if (!await networkInfo.isConnected) {
+      try {
+        final cachedTests = await localDataSource.getAllTests();
+        final categoryTests = cachedTests.where((test) => test.category == category).length;
+        return ApiResult.success(currentCount < categoryTests);
+      } catch (e) {
+        return ApiResult.success(false);
+      }
+    }
+
+    return _executeWithRetry(() async {
+      return await remoteDataSource.hasMoreTestsByCategory(category, currentCount);
+    });
+  }
+
+  @override
   Future<ApiResult<List<TestItem>>> hardRefreshTests({int pageSize = 5}) async {
     return _executeWithRetry(() async {
       await _invalidateCache();
       return await _fetchAndCacheTests(pageSize: pageSize);
+    });
+  }
+
+  @override
+  Future<ApiResult<List<TestItem>>> hardRefreshTestsByCategory(TestCategory category, {int pageSize = 5}) async {
+    return _executeWithRetry(() async {
+      if (!await networkInfo.isConnected) {
+        throw Exception('No internet connection for refresh');
+      }
+
+      final remoteTests = await remoteDataSource.getTestsByCategory(category, page: 0, pageSize: pageSize);
+      
+      if (remoteTests.isNotEmpty) {
+        await _updateCacheWithNewTests(remoteTests);
+      }
+      
+      return remoteTests;
     });
   }
 
@@ -159,7 +196,6 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   @override
   Future<ApiResult<TestItem?>> getTestById(String testId) async {
     try {
-      // First check cache
       final cachedTests = await localDataSource.getAllTests();
       final cachedTest = cachedTests.where((t) => t.id == testId).firstOrNull;
       
@@ -186,7 +222,6 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
     }
   }
 
-  // Test CRUD operations
   @override
   Future<ApiResult<TestItem>> createTest(TestItem test) async {
     if (!await networkInfo.isConnected) {
@@ -304,7 +339,6 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
     });
   }
 
-  // Permission checks
   @override
   Future<ApiResult<bool>> hasEditPermission(String testId, String userId) async {
     try {
@@ -328,15 +362,12 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
     return hasEditPermission(testId, userId);
   }
 
-  // Test results
   @override
   Future<ApiResult<bool>> saveTestResult(TestResult result) async {
     try {
-      // Always cache locally first
       await localDataSource.saveTestResult(result);
       
       if (!await networkInfo.isConnected) {
-        // Will be synced when connection is restored
         return ApiResult.success(true);
       }
 
@@ -453,13 +484,11 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
 
     final remoteTests = await remoteDataSource.getTests(page: 0, pageSize: pageSize);
     
-    // Detect deleted tests for cache sync
     final deletedIds = await _getDeletedTestIds(remoteTests);
     for (final deletedId in deletedIds) {
       await localDataSource.removeTest(deletedId);
     }
     
-    // Cache new/updated tests
     await _cacheTests(remoteTests);
     
     return remoteTests;

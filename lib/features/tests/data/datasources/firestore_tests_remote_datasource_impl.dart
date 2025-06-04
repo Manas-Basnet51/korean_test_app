@@ -16,8 +16,11 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
   final String userResultsSubcollection = 'test_results';
   
   DocumentSnapshot? _lastDocument;
+  final Map<TestCategory, DocumentSnapshot?> _categoryLastDocuments = {};
   int? _totalTestsCount;
+  final Map<TestCategory, int?> _categoryTestsCounts = {};
   DateTime? _lastCountFetch;
+  final Map<TestCategory, DateTime?> _categoryLastCountFetches = {};
 
   FirestoreTestsDataSourceImpl({
     required this.firestore,
@@ -67,7 +70,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
   Future<List<TestItem>> getTestsByCategory(TestCategory category, {int page = 0, int pageSize = 5}) async {
     try {
       if (page == 0) {
-        _lastDocument = null;
+        _categoryLastDocuments[category] = null;
       }
 
       Query query = firestore.collection(testsCollection)
@@ -76,15 +79,19 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
           .orderBy('createdAt', descending: true)
           .limit(pageSize);
       
-      if (page > 0 && _lastDocument != null) {
-        query = query.startAfterDocument(_lastDocument!);
+      if (page > 0 && _categoryLastDocuments[category] != null) {
+        query = query.startAfterDocument(_categoryLastDocuments[category]!);
       }
       
       final querySnapshot = await query.get();
       final docs = querySnapshot.docs;
       
       if (docs.isNotEmpty) {
-        _lastDocument = docs.last;
+        _categoryLastDocuments[category] = docs.last;
+      }
+
+      if (page == 0) {
+        _updateCategoryTestsCount(category, docs.length, isExact: false);
       }
       
       return docs.map((doc) {
@@ -120,6 +127,34 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to check for more tests: $e');
+    }
+  }
+
+  @override
+  Future<bool> hasMoreTestsByCategory(TestCategory category, int currentCount) async {
+    try {
+      final lastFetch = _categoryLastCountFetches[category];
+      final cachedCount = _categoryTestsCounts[category];
+      
+      if (cachedCount != null && 
+          lastFetch != null &&
+          DateTime.now().difference(lastFetch).inMinutes < 5) {
+        return currentCount < cachedCount;
+      }
+      
+      final countQuery = await firestore.collection(testsCollection)
+          .where('isPublished', isEqualTo: true)
+          .where('category', isEqualTo: category.toString().split('.').last)
+          .count()
+          .get();
+      
+      _updateCategoryTestsCount(category, countQuery.count!, isExact: true);
+      
+      return currentCount < _categoryTestsCounts[category]!;
+    } on FirebaseException catch (e) {
+      throw ExceptionMapper.mapFirebaseException(e);
+    } catch (e) {
+      throw Exception('Failed to check for more tests by category: $e');
     }
   }
 
@@ -216,11 +251,15 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       if (_totalTestsCount != null) {
         _totalTestsCount = (_totalTestsCount ?? 0) + 1;
       }
+
+      final categoryCount = _categoryTestsCounts[test.category];
+      if (categoryCount != null) {
+        _categoryTestsCounts[test.category] = categoryCount + 1;
+      }
       
-      // Return the updated TestItem with the correct ID
       return test.copyWith(
         id: docRef.id,
-        createdAt: DateTime.now(), // Since we can't get the server timestamp immediately
+        createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
       );
     } on FirebaseException catch (e) {
@@ -229,7 +268,6 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       throw Exception('Failed to upload test: $e');
     }
   }
-
 
   @override
   Future<bool> updateTest(String testId, TestItem updatedTest) async {
@@ -268,12 +306,18 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       }
       
       final data = docSnapshot.data() as Map<String, dynamic>;
+      final testData = TestItem.fromJson({...data, 'id': testId});
       
       await _deleteAssociatedFiles(data);
       await docRef.delete();
       
       if (_totalTestsCount != null && _totalTestsCount! > 0) {
         _totalTestsCount = _totalTestsCount! - 1;
+      }
+
+      final categoryCount = _categoryTestsCounts[testData.category];
+      if (categoryCount != null && categoryCount > 0) {
+        _categoryTestsCounts[testData.category] = categoryCount - 1;
       }
       
       return true;
@@ -375,7 +419,6 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
   @override
   Future<bool> saveTestResult(TestResult result) async {
     try {
-
       final userResultsRef = firestore
           .collection(usersCollection)
           .doc(result.userId)
@@ -386,7 +429,6 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
           : userResultsRef.doc(result.id);
       
       final resultData = result.toJson();
-
       resultData.remove('userId');
       
       if (result.id.isEmpty) {
@@ -419,7 +461,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       return querySnapshot.docs.map((doc) {
         final data = doc.data();
         data['id'] = doc.id;
-        data['userId'] = userId; // Add back userId for your TestResult model
+        data['userId'] = userId;
         return TestResult.fromJson(data);
       }).toList();
     } on FirebaseException catch (e) {
@@ -442,7 +484,6 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       return querySnapshot.docs.map((doc) {
         final data = doc.data();
         data['id'] = doc.id;
-        // Extract userId from document path: users/{userId}/test_results/{resultId}
         data['userId'] = doc.reference.parent.parent!.id;
         return TestResult.fromJson(data);
       }).toList();
@@ -496,6 +537,13 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
     if (isExact || _totalTestsCount == null || count > _totalTestsCount!) {
       _totalTestsCount = count;
       _lastCountFetch = DateTime.now();
+    }
+  }
+
+  void _updateCategoryTestsCount(TestCategory category, int count, {required bool isExact}) {
+    if (isExact || _categoryTestsCounts[category] == null || count > _categoryTestsCounts[category]!) {
+      _categoryTestsCounts[category] = count;
+      _categoryLastCountFetches[category] = DateTime.now();
     }
   }
 }

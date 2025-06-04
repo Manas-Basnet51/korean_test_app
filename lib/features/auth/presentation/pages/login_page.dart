@@ -36,7 +36,7 @@ class _LoginPageState extends State<LoginPage> {
       body: BlocConsumer<AuthCubit, AuthState>(
         listener: (context, state) {
           if (state is Authenticated || state is AuthAnonymousSignIn) {
-            context.go('/home');
+            //TODO: do something here or remove it 
           } else if (state is AuthError) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text(state.message)),
