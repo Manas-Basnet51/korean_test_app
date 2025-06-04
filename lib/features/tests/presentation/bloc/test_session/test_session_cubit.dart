@@ -3,9 +3,8 @@ import 'dart:developer' as dev;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:korean_language_app/core/data/base_state.dart';
 import 'package:korean_language_app/core/errors/api_result.dart';
-import 'package:korean_language_app/core/extensions/api_result_ext.dart';
+import 'package:korean_language_app/core/services/auth_service.dart';
 import 'package:korean_language_app/features/auth/domain/entities/user.dart';
-import 'package:korean_language_app/features/auth/presentation/bloc/auth_cubit.dart';
 import 'package:korean_language_app/features/tests/data/models/test_answer.dart';
 import 'package:korean_language_app/features/tests/data/models/test_item.dart';
 import 'package:korean_language_app/features/tests/data/models/test_result.dart';
@@ -15,14 +14,14 @@ part 'test_session_state.dart';
 
 class TestSessionCubit extends Cubit<TestSessionState> {
   final TestsRepository repository;
-  final AuthCubit authCubit;
+  final AuthService authService;
   
   Timer? _testTimer;
   Timer? _questionTimer;
   
   TestSessionCubit({
     required this.repository,
-    required this.authCubit,
+    required this.authService,
   }) : super(const TestSessionInitial());
 
   void startTest(TestItem test) {
@@ -350,11 +349,7 @@ class TestSessionCubit extends Cubit<TestSessionState> {
   }
 
   UserEntity? _getCurrentUser() {
-    final authState = authCubit.state;
-    if (authState is Authenticated) {
-      return authState.user;
-    }
-    return null;
+    return authService.getCurrentUser();
   }
 
   @override

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:korean_language_app/core/data/base_repository.dart';
 import 'package:korean_language_app/core/errors/api_result.dart';
 import 'package:korean_language_app/core/network/network_info.dart';
+import 'package:korean_language_app/core/utils/exception_mapper.dart';
 import 'package:korean_language_app/features/profile/data/datasources/profile_local_data_source.dart';
 import 'package:korean_language_app/features/profile/data/datasources/profile_remote_data_source.dart';
 import 'package:korean_language_app/features/profile/domain/repositories/profile_repository.dart';
@@ -154,24 +155,6 @@ class ProfileRepositoryImpl extends BaseRepository implements ProfileRepository 
       }
     }
     
-    return _mapExceptionToApiResult(lastException!);
-  }
-
-  ApiResult<T> _mapExceptionToApiResult<T>(Exception e) {
-    final message = e.toString();
-    
-    if (message.contains('Permission denied')) {
-      return ApiResult.failure(message, FailureType.permission);
-    } else if (message.contains('not found')) {
-      return ApiResult.failure(message, FailureType.notFound);
-    } else if (message.contains('Authentication required')) {
-      return ApiResult.failure(message, FailureType.auth);
-    } else if (message.contains('Service unavailable')) {
-      return ApiResult.failure(message, FailureType.server);
-    } else if (message.contains('No internet connection')) {
-      return ApiResult.failure(message, FailureType.network);
-    } else {
-      return ApiResult.failure(message, FailureType.unknown);
-    }
+    return ExceptionMapper.mapExceptionToApiResult(lastException!);
   }
 }

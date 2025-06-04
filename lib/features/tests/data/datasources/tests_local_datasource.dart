@@ -1,29 +1,28 @@
 import 'package:korean_language_app/features/tests/data/models/test_item.dart';
 import 'package:korean_language_app/features/tests/data/models/test_result.dart';
 
-import '../../domain/entities/cache_health_status.dart';
-
 abstract class TestsLocalDataSource {
-  Future<List<TestItem>> getCachedTests();
-  Future<void> cacheTests(List<TestItem> tests);
-  Future<bool> hasAnyCachedTests();
-  Future<int> getCachedTestsCount();
-  Future<void> clearCachedTests();
-  Future<void> updateTestMetadata(TestItem test);
-  Future<void> removeTestFromCache(String testId);
+  // Basic test operations
+  Future<List<TestItem>> getAllTests();
+  Future<void> saveTests(List<TestItem> tests);
+  Future<void> addTest(TestItem test);
+  Future<void> updateTest(TestItem test);
+  Future<void> removeTest(String testId);
+  Future<void> clearAllTests();
+  Future<bool> hasAnyTests();
+  Future<int> getTestsCount();
   
-  Future<bool> isCacheValid();
-  Future<void> invalidateCache();
-  Future<List<String>> getDeletedTestIds(List<TestItem> remoteTests);
-  Future<bool> hasTestChanged(TestItem test);
-  Future<void> markTestAsSynced(TestItem test);
-  Future<CacheHealthStatus> checkCacheHealth();
+  // metadata operations
+  Future<void> setLastSyncTime(DateTime dateTime);
+  Future<DateTime?> getLastSyncTime();
+  Future<void> setTestHashes(Map<String, String> hashes);
+  Future<Map<String, String>> getTestHashes();
   
-  // Test results caching
-  Future<List<TestResult>> getCachedUserResults(String userId);
-  Future<void> cacheUserResults(String userId, List<TestResult> results);
-  Future<TestResult?> getCachedLatestResult(String userId, String testId);
-  Future<void> cacheTestResult(TestResult result);
-  Future<void> clearCachedResults(String userId);
+  // Test results operations
+  Future<List<TestResult>> getUserResults(String userId);
+  Future<void> saveUserResults(String userId, List<TestResult> results);
+  Future<TestResult?> getLatestResult(String userId, String testId);
+  Future<void> saveTestResult(TestResult result);
+  Future<void> clearUserResults(String userId);
+  Future<void> clearAllResults();
 }
-

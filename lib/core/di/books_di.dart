@@ -22,15 +22,16 @@ void registerBooksDependencies(GetIt sl) {
   // Cubits
   sl.registerFactory(() => KoreanBooksCubit(
     repository: sl(),
-    authCubit: sl(),
+    authService: sl(),
     adminService: sl(),
   ));
+
   sl.registerFactory(() => FavoriteBooksCubit(sl()));
   
   // Upload related
   sl.registerFactory(() => FileUploadCubit(
     uploadRepository: sl(),
-    authCubit: sl(),
+    authService: sl(),
   ));
   
   sl.registerLazySingleton<BookUploadRepository>(
@@ -70,10 +71,10 @@ void registerBooksDependencies(GetIt sl) {
   );
   
   sl.registerLazySingleton<KoreanBooksLocalDataSource>(
-    () => KoreanBooksLocalDataSourceImpl(sharedPreferences: sl())
+    () => KoreanBooksLocalDataSourceImpl(storageService: sl())
   );
   
   sl.registerLazySingleton<FavoriteBooksLocalDataSource>(
-    () => FavoriteBooksLocalDataSourceImpl(sharedPreferences: sl())
+    () => FavoriteBooksLocalDataSourceImpl(storageService: sl()) // Changed parameter
   );
 }

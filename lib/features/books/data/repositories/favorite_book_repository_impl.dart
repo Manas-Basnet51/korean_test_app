@@ -18,7 +18,7 @@ class FavoriteBookRepositoryImpl extends BaseRepository implements FavoriteBookR
   @override
   Future<ApiResult<void>> clearCachedBooks() async {
     try {
-      await localDataSource.clearCachedFavoriteBooks();
+      await localDataSource.clearAllBooks();
       dev.log('Favorite books cache cleared successfully');
       return ApiResult.success(null);
     } catch (e) {
@@ -29,16 +29,17 @@ class FavoriteBookRepositoryImpl extends BaseRepository implements FavoriteBookR
 
   @override
   Future<ApiResult<List<BookItem>>> getBooks(CourseCategory category, {int page = 0, int pageSize = 5}) {
-    // Favorites are always local, so just return cached books
+    // Favorites are always local, so just return all books
     return getBooksFromCache();
   }
 
   @override
   Future<ApiResult<List<BookItem>>> getBooksFromCache() async {
     try {
-      final books = await localDataSource.getCachedFavoriteBooks();
-      dev.log('Retrieved ${books.length} favorite books from cache');
-      return ApiResult.success(books);
+      final books = await localDataSource.getAllBooks();
+      final validBooks = _filterValidBooks(books);
+      dev.log('Retrieved ${validBooks.length} favorite books from cache');
+      return ApiResult.success(validBooks);
     } catch (e) {
       dev.log('Failed to get favorite books from cache: $e');
       return ApiResult.failure('Failed to get favorite books from cache: $e', FailureType.cache);
@@ -55,7 +56,7 @@ class FavoriteBookRepositoryImpl extends BaseRepository implements FavoriteBookR
   @override
   Future<ApiResult<bool>> hasMoreBooks(CourseCategory category, int currentCount) async {
     try {
-      final totalCount = await localDataSource.getCachedBooksCount();
+      final totalCount = await localDataSource.getBooksCount();
       final hasMore = currentCount < totalCount;
       dev.log('Favorite books hasMore check: $currentCount < $totalCount = $hasMore');
       return ApiResult.success(hasMore);
@@ -68,14 +69,15 @@ class FavoriteBookRepositoryImpl extends BaseRepository implements FavoriteBookR
   @override
   Future<ApiResult<List<BookItem>>> searchBooks(CourseCategory category, String query) async {
     try {
-      final allBooks = await localDataSource.getCachedFavoriteBooks();
+      final allBooks = await localDataSource.getAllBooks();
+      final validBooks = _filterValidBooks(allBooks);
       final normalizedQuery = query.toLowerCase().trim();
       
       if (normalizedQuery.isEmpty) {
-        return ApiResult.success(allBooks);
+        return ApiResult.success(validBooks);
       }
       
-      final results = allBooks.where((book) {
+      final results = validBooks.where((book) {
         return book.title.toLowerCase().contains(normalizedQuery) ||
                book.description.toLowerCase().contains(normalizedQuery) ||
                book.category.toLowerCase().contains(normalizedQuery);
@@ -92,9 +94,12 @@ class FavoriteBookRepositoryImpl extends BaseRepository implements FavoriteBookR
   @override
   Future<ApiResult<List<BookItem>>> addFavoritedBook(BookItem bookItem) async {
     try {
-      final updatedBooks = await localDataSource.addFavoritedBook(bookItem);
+      await localDataSource.addBook(bookItem);
+      final updatedBooks = await localDataSource.getAllBooks();
+      final validBooks = _filterValidBooks(updatedBooks);
+      
       dev.log('Added book to favorites: ${bookItem.title} (${bookItem.id})');
-      return ApiResult.success(updatedBooks);
+      return ApiResult.success(validBooks);
     } catch (e) {
       dev.log('Failed to add book to favorites: $e');
       return ApiResult.failure('Failed to add book to favorites: $e', FailureType.cache);
@@ -104,9 +109,12 @@ class FavoriteBookRepositoryImpl extends BaseRepository implements FavoriteBookR
   @override
   Future<ApiResult<List<BookItem>>> removeBookFromFavorite(BookItem bookItem) async {
     try {
-      final updatedBooks = await localDataSource.removeBookFromCache(bookItem.id);
+      await localDataSource.removeBook(bookItem.id);
+      final updatedBooks = await localDataSource.getAllBooks();
+      final validBooks = _filterValidBooks(updatedBooks);
+      
       dev.log('Removed book from favorites: ${bookItem.title} (${bookItem.id})');
-      return ApiResult.success(updatedBooks);
+      return ApiResult.success(validBooks);
     } catch (e) {
       dev.log('Failed to remove book from favorites: $e');
       return ApiResult.failure('Failed to remove book from favorites: $e', FailureType.cache);
@@ -117,7 +125,7 @@ class FavoriteBookRepositoryImpl extends BaseRepository implements FavoriteBookR
   
   Future<ApiResult<bool>> isBookFavorited(String bookId) async {
     try {
-      final favoriteBooks = await localDataSource.getCachedFavoriteBooks();
+      final favoriteBooks = await localDataSource.getAllBooks();
       final isFavorited = favoriteBooks.any((book) => book.id == bookId);
       return ApiResult.success(isFavorited);
     } catch (e) {
@@ -128,7 +136,7 @@ class FavoriteBookRepositoryImpl extends BaseRepository implements FavoriteBookR
 
   Future<ApiResult<int>> getFavoriteBooksCount() async {
     try {
-      final count = await localDataSource.getCachedBooksCount();
+      final count = await localDataSource.getBooksCount();
       return ApiResult.success(count);
     } catch (e) {
       dev.log('Failed to get favorite books count: $e');
@@ -138,8 +146,9 @@ class FavoriteBookRepositoryImpl extends BaseRepository implements FavoriteBookR
 
   Future<ApiResult<List<BookItem>>> getFavoriteBooksByCategory(String category) async {
     try {
-      final allFavorites = await localDataSource.getCachedFavoriteBooks();
-      final filteredBooks = allFavorites.where((book) => 
+      final allFavorites = await localDataSource.getAllBooks();
+      final validBooks = _filterValidBooks(allFavorites);
+      final filteredBooks = validBooks.where((book) => 
         book.category.toLowerCase() == category.toLowerCase()
       ).toList();
       
@@ -152,21 +161,31 @@ class FavoriteBookRepositoryImpl extends BaseRepository implements FavoriteBookR
 
   Future<ApiResult<List<BookItem>>> getRecentlyFavoritedBooks({int limit = 5}) async {
     try {
-      final allFavorites = await localDataSource.getCachedFavoriteBooks();
+      final allFavorites = await localDataSource.getAllBooks();
+      final validBooks = _filterValidBooks(allFavorites);
       
       // Sort by creation date if available, otherwise by title
-      allFavorites.sort((a, b) {
+      validBooks.sort((a, b) {
         if (a.createdAt != null && b.createdAt != null) {
           return b.createdAt!.compareTo(a.createdAt!);
         }
         return a.title.compareTo(b.title);
       });
       
-      final recentBooks = allFavorites.take(limit).toList();
+      final recentBooks = validBooks.take(limit).toList();
       return ApiResult.success(recentBooks);
     } catch (e) {
       dev.log('Failed to get recently favorited books: $e');
       return ApiResult.failure('Failed to get recently favorited books: $e', FailureType.cache);
     }
+  }
+
+  // Private helper methods
+  List<BookItem> _filterValidBooks(List<BookItem> books) {
+    return books.where((book) => 
+      book.id.isNotEmpty && 
+      book.title.isNotEmpty && 
+      book.description.isNotEmpty
+    ).toList();
   }
 }

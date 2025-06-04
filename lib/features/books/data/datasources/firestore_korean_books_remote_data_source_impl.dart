@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
+import 'package:korean_language_app/core/utils/exception_mapper.dart';
 import 'package:korean_language_app/features/books/data/datasources/korean_books_remote_data_source.dart';
 import 'package:korean_language_app/features/books/data/models/book_item.dart';
 
@@ -51,7 +52,7 @@ class FirestoreKoreanBooksDataSource implements KoreanBooksRemoteDataSource {
         return BookItem.fromJson(data);
       }).toList();
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to fetch books: $e');
     }
@@ -71,7 +72,7 @@ class FirestoreKoreanBooksDataSource implements KoreanBooksRemoteDataSource {
       
       return currentCount < _totalBooksCount!;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to check for more books: $e');
     }
@@ -116,7 +117,7 @@ class FirestoreKoreanBooksDataSource implements KoreanBooksRemoteDataSource {
       
       return results;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to search books: $e');
     }
@@ -150,7 +151,7 @@ class FirestoreKoreanBooksDataSource implements KoreanBooksRemoteDataSource {
       
       return true;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to upload book: $e');
     }
@@ -176,7 +177,7 @@ class FirestoreKoreanBooksDataSource implements KoreanBooksRemoteDataSource {
       
       return true;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to update book: $e');
     }
@@ -203,7 +204,7 @@ class FirestoreKoreanBooksDataSource implements KoreanBooksRemoteDataSource {
       
       return true;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to delete book: $e');
     }
@@ -232,7 +233,7 @@ class FirestoreKoreanBooksDataSource implements KoreanBooksRemoteDataSource {
       
       return (downloadUrl, storagePath);
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to upload PDF: $e');
     }
@@ -253,7 +254,7 @@ class FirestoreKoreanBooksDataSource implements KoreanBooksRemoteDataSource {
       
       return (downloadUrl, storagePath);
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to upload cover image: $e');
     }
@@ -276,7 +277,7 @@ class FirestoreKoreanBooksDataSource implements KoreanBooksRemoteDataSource {
       
       return null;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to get book last updated: $e');
     }
@@ -308,7 +309,7 @@ class FirestoreKoreanBooksDataSource implements KoreanBooksRemoteDataSource {
         return null;
       }
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to download PDF: $e');
     }
@@ -331,7 +332,7 @@ class FirestoreKoreanBooksDataSource implements KoreanBooksRemoteDataSource {
       
       return null;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to get PDF URL: $e');
     }
@@ -349,7 +350,7 @@ class FirestoreKoreanBooksDataSource implements KoreanBooksRemoteDataSource {
       
       return downloadUrl;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to regenerate URL: $e');
     }
@@ -377,22 +378,6 @@ class FirestoreKoreanBooksDataSource implements KoreanBooksRemoteDataSource {
       }
     } catch (e) {
       return false;
-    }
-  }
-  
-  Exception _mapFirebaseException(FirebaseException e) {
-    switch (e.code) {
-      case 'permission-denied':
-        return Exception('Permission denied: ${e.message}');
-      case 'not-found':
-        return Exception('Resource not found: ${e.message}');
-      case 'unauthenticated':
-      case 'unauthorized':
-        return Exception('Authentication required: ${e.message}');
-      case 'unavailable':
-        return Exception('Service unavailable: ${e.message}');
-      default:
-        return Exception('Server error: ${e.message}');
     }
   }
 

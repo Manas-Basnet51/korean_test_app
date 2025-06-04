@@ -4,18 +4,21 @@ import 'package:korean_language_app/core/data/base_repository.dart';
 import 'package:korean_language_app/core/enums/test_category.dart';
 import 'package:korean_language_app/core/errors/api_result.dart';
 import 'package:korean_language_app/core/network/network_info.dart';
+import 'package:korean_language_app/core/utils/exception_mapper.dart';
 import 'package:korean_language_app/features/admin/data/service/admin_permission.dart';
 import 'package:korean_language_app/features/tests/data/datasources/tests_local_datasource.dart';
 import 'package:korean_language_app/features/tests/data/datasources/tests_remote_datasource.dart';
-import 'package:korean_language_app/features/tests/domain/repositories/tests_repository.dart';
 import 'package:korean_language_app/features/tests/data/models/test_item.dart';
 import 'package:korean_language_app/features/tests/data/models/test_result.dart';
+import 'package:korean_language_app/features/tests/domain/repositories/tests_repository.dart';
 
 class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   final TestsRemoteDataSource remoteDataSource;
   final TestsLocalDataSource localDataSource;
   final AdminPermissionService adminService;
   
+  // Caching configuration
+  static const Duration cacheValidityDuration = Duration(hours: 2);
   static const int maxRetries = 3;
   static const Duration initialRetryDelay = Duration(seconds: 1);
 
@@ -38,9 +41,10 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
       }
 
       // Check cache validity for first page
-      if (await localDataSource.isCacheValid()) {
-        final cachedTests = await localDataSource.getCachedTests();
-        if (cachedTests.isNotEmpty) {
+      if (await _isCacheValid()) {
+        final cachedTests = await localDataSource.getAllTests();
+        if (cachedTests.isNotEmpty && _areValidTests(cachedTests)) {
+          dev.log('Returning ${cachedTests.length} tests from valid cache');
           return cachedTests;
         }
       }
@@ -55,20 +59,28 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
     return _executeWithRetry(() async {
       if (!await networkInfo.isConnected) {
         // Try to return cached data filtered by category
-        final cachedTests = await localDataSource.getCachedTests();
+        final cachedTests = await localDataSource.getAllTests();
         final filteredTests = cachedTests.where((test) => test.category == category).toList();
-        return filteredTests;
+        return _filterValidTests(filteredTests);
       }
 
-      return await remoteDataSource.getTestsByCategory(category, page: page, pageSize: pageSize);
+      final remoteTests = await remoteDataSource.getTestsByCategory(category, page: page, pageSize: pageSize);
+      
+      // Update cache with new tests
+      if (remoteTests.isNotEmpty) {
+        await _updateCacheWithNewTests(remoteTests);
+      }
+      
+      return remoteTests;
     });
   }
 
   @override
   Future<ApiResult<List<TestItem>>> getTestsFromCache() async {
     try {
-      final tests = await localDataSource.getCachedTests();
-      return ApiResult.success(tests);
+      final tests = await localDataSource.getAllTests();
+      final validTests = _filterValidTests(tests);
+      return ApiResult.success(validTests);
     } catch (e) {
       return ApiResult.failure('Failed to get cached tests: $e', FailureType.cache);
     }
@@ -78,7 +90,7 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   Future<ApiResult<bool>> hasMoreTests(int currentCount) async {
     if (!await networkInfo.isConnected) {
       try {
-        final totalCached = await localDataSource.getCachedTestsCount();
+        final totalCached = await localDataSource.getTestsCount();
         return ApiResult.success(currentCount < totalCached);
       } catch (e) {
         return ApiResult.success(false);
@@ -93,7 +105,7 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   @override
   Future<ApiResult<List<TestItem>>> hardRefreshTests({int pageSize = 5}) async {
     return _executeWithRetry(() async {
-      await localDataSource.clearCachedTests();
+      await _invalidateCache();
       return await _fetchAndCacheTests(pageSize: pageSize);
     });
   }
@@ -105,8 +117,8 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
     }
 
     try {
-      final cachedTests = await localDataSource.getCachedTests();
-      final cachedResults = _searchInCache(cachedTests, query);
+      final cachedTests = await localDataSource.getAllTests();
+      final cachedResults = _searchInTests(cachedTests, query);
       
       if (!await networkInfo.isConnected) {
         return ApiResult.success(cachedResults);
@@ -116,7 +128,7 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
         final remoteResults = await remoteDataSource.searchTests(query);
         
         if (remoteResults.isNotEmpty) {
-          await localDataSource.cacheTests(remoteResults);
+          await _updateCacheWithNewTests(remoteResults);
         }
         
         final combinedResults = _combineAndDeduplicateResults(cachedResults, remoteResults);
@@ -125,11 +137,11 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
       
     } catch (e) {
       try {
-        final cachedTests = await localDataSource.getCachedTests();
-        final cachedResults = _searchInCache(cachedTests, query);
+        final cachedTests = await localDataSource.getAllTests();
+        final cachedResults = _searchInTests(cachedTests, query);
         return ApiResult.success(cachedResults);
       } catch (cacheError) {
-        return _mapExceptionToApiResult(e as Exception);
+        return ExceptionMapper.mapExceptionToApiResult(e as Exception);
       }
     }
   }
@@ -137,7 +149,7 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   @override
   Future<ApiResult<void>> clearCachedTests() async {
     try {
-      await localDataSource.clearCachedTests();
+      await localDataSource.clearAllTests();
       return ApiResult.success(null);
     } catch (e) {
       return ApiResult.failure('Failed to clear cache: $e', FailureType.cache);
@@ -148,10 +160,10 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   Future<ApiResult<TestItem?>> getTestById(String testId) async {
     try {
       // First check cache
-      final cachedTests = await localDataSource.getCachedTests();
+      final cachedTests = await localDataSource.getAllTests();
       final cachedTest = cachedTests.where((t) => t.id == testId).firstOrNull;
       
-      if (cachedTest != null && await localDataSource.isCacheValid()) {
+      if (cachedTest != null && await _isCacheValid()) {
         return ApiResult.success(cachedTest);
       }
 
@@ -163,13 +175,14 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
         final remoteTest = await remoteDataSource.getTestById(testId);
         
         if (remoteTest != null) {
-          await localDataSource.updateTestMetadata(remoteTest);
+          await localDataSource.updateTest(remoteTest);
+          await _updateTestHash(remoteTest);
         }
         
         return remoteTest;
       });
     } catch (e) {
-      return _mapExceptionToApiResult(e as Exception);
+      return ExceptionMapper.mapExceptionToApiResult(e as Exception);
     }
   }
 
@@ -185,7 +198,9 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
       
       if (success) {
         try {
-          await localDataSource.cacheTests([test]);
+          await localDataSource.addTest(test);
+          await _updateTestHash(test);
+          await _updateLastSyncTime();
         } catch (e) {
           dev.log('Failed to cache after create: $e');
         }
@@ -206,7 +221,8 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
       
       if (success) {
         try {
-          await localDataSource.updateTestMetadata(updatedTest);
+          await localDataSource.updateTest(updatedTest);
+          await _updateTestHash(updatedTest);
         } catch (e) {
           dev.log('Failed to update local cache: $e');
         }
@@ -227,7 +243,8 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
       
       if (success) {
         try {
-          await localDataSource.removeTestFromCache(testId);
+          await localDataSource.removeTest(testId);
+          await _removeTestHash(testId);
         } catch (e) {
           dev.log('Failed to remove from cache: $e');
         }
@@ -277,8 +294,9 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
         final updatedTest = test.copyWith(imageUrl: newUrl);
         
         try {
-          await localDataSource.updateTestMetadata(updatedTest);
+          await localDataSource.updateTest(updatedTest);
           await remoteDataSource.updateTest(test.id, updatedTest);
+          await _updateTestHash(updatedTest);
         } catch (e) {
           dev.log('Failed to update test with new image URL: $e');
         }
@@ -317,7 +335,7 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   Future<ApiResult<bool>> saveTestResult(TestResult result) async {
     try {
       // Always cache locally first
-      await localDataSource.cacheTestResult(result);
+      await localDataSource.saveTestResult(result);
       
       if (!await networkInfo.isConnected) {
         // Will be synced when connection is restored
@@ -328,14 +346,14 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
         return await remoteDataSource.saveTestResult(result);
       });
     } catch (e) {
-      return _mapExceptionToApiResult(e as Exception);
+      return ExceptionMapper.mapExceptionToApiResult(e as Exception);
     }
   }
 
   @override
   Future<ApiResult<List<TestResult>>> getUserTestResults(String userId, {int limit = 20}) async {
     try {
-      final cachedResults = await localDataSource.getCachedUserResults(userId);
+      final cachedResults = await localDataSource.getUserResults(userId);
       
       if (!await networkInfo.isConnected) {
         return ApiResult.success(cachedResults);
@@ -345,17 +363,17 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
         final remoteResults = await remoteDataSource.getUserTestResults(userId, limit: limit);
         
         if (remoteResults.isNotEmpty) {
-          await localDataSource.cacheUserResults(userId, remoteResults);
+          await localDataSource.saveUserResults(userId, remoteResults);
         }
         
         return remoteResults.isNotEmpty ? remoteResults : cachedResults;
       });
     } catch (e) {
       try {
-        final cachedResults = await localDataSource.getCachedUserResults(userId);
+        final cachedResults = await localDataSource.getUserResults(userId);
         return ApiResult.success(cachedResults);
       } catch (cacheError) {
-        return _mapExceptionToApiResult(e as Exception);
+        return ExceptionMapper.mapExceptionToApiResult(e as Exception);
       }
     }
   }
@@ -374,7 +392,7 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   @override
   Future<ApiResult<TestResult?>> getUserLatestResult(String userId, String testId) async {
     try {
-      final cachedResult = await localDataSource.getCachedLatestResult(userId, testId);
+      final cachedResult = await localDataSource.getLatestResult(userId, testId);
       
       if (!await networkInfo.isConnected) {
         return ApiResult.success(cachedResult);
@@ -384,17 +402,17 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
         final remoteResult = await remoteDataSource.getUserLatestResult(userId, testId);
         
         if (remoteResult != null) {
-          await localDataSource.cacheTestResult(remoteResult);
+          await localDataSource.saveTestResult(remoteResult);
         }
         
         return remoteResult ?? cachedResult;
       });
     } catch (e) {
       try {
-        final cachedResult = await localDataSource.getCachedLatestResult(userId, testId);
+        final cachedResult = await localDataSource.getLatestResult(userId, testId);
         return ApiResult.success(cachedResult);
       } catch (cacheError) {
-        return _mapExceptionToApiResult(e as Exception);
+        return ExceptionMapper.mapExceptionToApiResult(e as Exception);
       }
     }
   }
@@ -402,60 +420,136 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   @override
   Future<ApiResult<List<TestResult>>> getCachedUserResults(String userId) async {
     try {
-      final results = await localDataSource.getCachedUserResults(userId);
+      final results = await localDataSource.getUserResults(userId);
       return ApiResult.success(results);
     } catch (e) {
       return ApiResult.failure('Failed to get cached results: $e', FailureType.cache);
     }
   }
 
-  // Helper methods
-  Future<ApiResult<T>> _executeWithRetry<T>(Future<T> Function() operation) async {
-    Exception? lastException;
-    
-    for (int attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        final result = await operation();
-        return ApiResult.success(result);
-      } catch (e) {
-        lastException = e as Exception;
-        
-        if (attempt == maxRetries) {
-          break;
-        }
-        
-        final delay = Duration(seconds: initialRetryDelay.inSeconds * attempt);
-        await Future.delayed(delay);
-        
-        dev.log('Retry attempt $attempt failed: $e. Retrying in ${delay.inSeconds}s...');
-      }
+  // Private caching methods
+  Future<bool> _isCacheValid() async {
+    try {
+      final lastSyncTime = await localDataSource.getLastSyncTime();
+      if (lastSyncTime == null) return false;
+      
+      final cacheAge = DateTime.now().difference(lastSyncTime);
+      return cacheAge < cacheValidityDuration;
+    } catch (e) {
+      return false;
     }
-    
-    return _mapExceptionToApiResult(lastException!);
+  }
+
+  Future<void> _invalidateCache() async {
+    await localDataSource.clearAllTests();
   }
 
   Future<List<TestItem>> _fetchAndCacheTests({required int pageSize}) async {
     if (!await networkInfo.isConnected) {
-      final cachedTests = await localDataSource.getCachedTests();
+      final cachedTests = await localDataSource.getAllTests();
       if (cachedTests.isNotEmpty) {
-        return cachedTests;
+        return _filterValidTests(cachedTests);
       }
       throw Exception('No internet connection and no cached data');
     }
 
     final remoteTests = await remoteDataSource.getTests(page: 0, pageSize: pageSize);
     
-    final deletedIds = await localDataSource.getDeletedTestIds(remoteTests);
+    // Detect deleted tests for cache sync
+    final deletedIds = await _getDeletedTestIds(remoteTests);
     for (final deletedId in deletedIds) {
-      await localDataSource.removeTestFromCache(deletedId);
+      await localDataSource.removeTest(deletedId);
     }
     
-    await localDataSource.cacheTests(remoteTests);
+    // Cache new/updated tests
+    await _cacheTests(remoteTests);
     
     return remoteTests;
   }
 
-  List<TestItem> _searchInCache(List<TestItem> tests, String query) {
+  Future<void> _cacheTests(List<TestItem> tests) async {
+    try {
+      final existingTests = await localDataSource.getAllTests();
+      final mergedTests = _mergeTests(existingTests, tests);
+      
+      await localDataSource.saveTests(mergedTests);
+      await _updateLastSyncTime();
+      await _updateTestsHashes(mergedTests);
+    } catch (e) {
+      dev.log('Failed to cache tests: $e');
+    }
+  }
+
+  Future<void> _updateCacheWithNewTests(List<TestItem> newTests) async {
+    try {
+      for (final test in newTests) {
+        await localDataSource.addTest(test);
+        await _updateTestHash(test);
+      }
+    } catch (e) {
+      dev.log('Failed to update cache with new tests: $e');
+    }
+  }
+
+  Future<void> _updateLastSyncTime() async {
+    await localDataSource.setLastSyncTime(DateTime.now());
+  }
+
+  Future<void> _updateTestsHashes(List<TestItem> tests) async {
+    final hashes = <String, String>{};
+    for (final test in tests) {
+      hashes[test.id] = _generateTestHash(test);
+    }
+    await localDataSource.setTestHashes(hashes);
+  }
+
+  Future<void> _updateTestHash(TestItem test) async {
+    final currentHashes = await localDataSource.getTestHashes();
+    currentHashes[test.id] = _generateTestHash(test);
+    await localDataSource.setTestHashes(currentHashes);
+  }
+
+  Future<void> _removeTestHash(String testId) async {
+    final currentHashes = await localDataSource.getTestHashes();
+    currentHashes.remove(testId);
+    await localDataSource.setTestHashes(currentHashes);
+  }
+
+  Future<List<String>> _getDeletedTestIds(List<TestItem> remoteTests) async {
+    try {
+      final cachedTests = await localDataSource.getAllTests();
+      final remoteTestIds = remoteTests.map((test) => test.id).toSet();
+      
+      final deletedIds = cachedTests
+          .where((test) => !remoteTestIds.contains(test.id))
+          .map((test) => test.id)
+          .toList();
+      
+      return deletedIds;
+    } catch (e) {
+      dev.log('Error detecting deleted tests: $e');
+      return [];
+    }
+  }
+
+  List<TestItem> _mergeTests(List<TestItem> existing, List<TestItem> newTests) {
+    final Map<String, TestItem> testMap = {};
+    
+    for (final test in existing) {
+      testMap[test.id] = test;
+    }
+    
+    for (final test in newTests) {
+      testMap[test.id] = test;
+    }
+    
+    final mergedTests = testMap.values.toList();
+    mergedTests.sort((a, b) => (b.createdAt ?? DateTime.now()).compareTo(a.createdAt ?? DateTime.now()));
+    
+    return mergedTests;
+  }
+
+  List<TestItem> _searchInTests(List<TestItem> tests, String query) {
     final normalizedQuery = query.toLowerCase();
     
     return tests.where((test) {
@@ -482,42 +576,68 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
     return uniqueTests.values.toList();
   }
 
+  List<TestItem> _filterValidTests(List<TestItem> tests) {
+    return tests.where((test) => 
+      test.id.isNotEmpty && 
+      test.title.isNotEmpty && 
+      test.description.isNotEmpty &&
+      test.questions.isNotEmpty
+    ).toList();
+  }
+
+  bool _areValidTests(List<TestItem> tests) {
+    return tests.every((test) => 
+      test.id.isNotEmpty && 
+      test.title.isNotEmpty && 
+      test.description.isNotEmpty &&
+      test.questions.isNotEmpty
+    );
+  }
+
+  String _generateTestHash(TestItem test) {
+    final content = '${test.title}_${test.description}_${test.questions.length}_${test.updatedAt?.millisecondsSinceEpoch ?? 0}';
+    return content.hashCode.toString();
+  }
+
   Future<void> _updateTestImageInCache(String testId, String imageUrl, String imagePath) async {
     try {
-      final cachedTests = await localDataSource.getCachedTests();
-      final testIndex = cachedTests.indexWhere((t) => t.id == testId);
+      final tests = await localDataSource.getAllTests();
+      final test = tests.firstWhere((t) => t.id == testId);
       
-      if (testIndex != -1) {
-        final updatedTest = cachedTests[testIndex].copyWith(
-          imageUrl: imageUrl,
-          imagePath: imagePath,
-        );
-        
-        await localDataSource.updateTestMetadata(updatedTest);
-        await remoteDataSource.updateTest(testId, updatedTest);
-      }
+      final updatedTest = test.copyWith(
+        imageUrl: imageUrl,
+        imagePath: imagePath,
+      );
+      
+      await localDataSource.updateTest(updatedTest);
+      await remoteDataSource.updateTest(testId, updatedTest);
+      await _updateTestHash(updatedTest);
     } catch (e) {
       dev.log('Error updating test image in cache: $e');
     }
   }
 
-  ApiResult<T> _mapExceptionToApiResult<T>(Exception e) {
-    final message = e.toString();
+  Future<ApiResult<T>> _executeWithRetry<T>(Future<T> Function() operation) async {
+    Exception? lastException;
     
-    if (message.contains('Permission denied')) {
-      return ApiResult.failure(message, FailureType.permission);
-    } else if (message.contains('not found') || message.contains('Resource not found')) {
-      return ApiResult.failure(message, FailureType.notFound);
-    } else if (message.contains('Authentication required')) {
-      return ApiResult.failure(message, FailureType.auth);
-    } else if (message.contains('Service unavailable') || message.contains('Server error')) {
-      return ApiResult.failure(message, FailureType.server);
-    } else if (message.contains('No internet connection')) {
-      return ApiResult.failure(message, FailureType.network);
-    } else if (message.contains('validation') || message.contains('cannot be empty')) {
-      return ApiResult.failure(message, FailureType.validation);
-    } else {
-      return ApiResult.failure(message, FailureType.unknown);
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        final result = await operation();
+        return ApiResult.success(result);
+      } catch (e) {
+        lastException = e as Exception;
+        
+        if (attempt == maxRetries) {
+          break;
+        }
+        
+        final delay = Duration(seconds: initialRetryDelay.inSeconds * attempt);
+        await Future.delayed(delay);
+        
+        dev.log('Retry attempt $attempt failed: $e. Retrying in ${delay.inSeconds}s...');
+      }
     }
+    
+    return ExceptionMapper.mapExceptionToApiResult(lastException!);
   }
 }

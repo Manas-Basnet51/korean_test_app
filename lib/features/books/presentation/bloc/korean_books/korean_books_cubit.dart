@@ -8,18 +8,17 @@ import 'package:korean_language_app/core/data/base_state.dart';
 import 'package:korean_language_app/core/enums/book_level.dart';
 import 'package:korean_language_app/core/enums/course_category.dart';
 import 'package:korean_language_app/core/errors/api_result.dart';
-import 'package:korean_language_app/core/extensions/api_result_ext.dart';
+import 'package:korean_language_app/core/services/auth_service.dart';
 import 'package:korean_language_app/features/admin/data/service/admin_permission.dart';
 import 'package:korean_language_app/features/auth/domain/entities/user.dart';
 import 'package:korean_language_app/features/books/domain/repositories/korean_book_repository.dart';
-import 'package:korean_language_app/features/auth/presentation/bloc/auth_cubit.dart';
 import 'package:korean_language_app/features/books/data/models/book_item.dart';
 
 part 'korean_books_state.dart';
 
 class KoreanBooksCubit extends Cubit<KoreanBooksState> {
   final KoreanBookRepository repository;
-  final AuthCubit authCubit;
+  final AuthService authService;
   final AdminPermissionService adminService;
   
   int _currentPage = 0;
@@ -40,11 +39,12 @@ class KoreanBooksCubit extends Cubit<KoreanBooksState> {
   
   KoreanBooksCubit({
     required this.repository,
-    required this.authCubit,
+    required this.authService,
     required this.adminService,
   }) : super(const KoreanBooksInitial()) {
     _initializeConnectivityListener();
   }
+
 
   void _initializeConnectivityListener() {
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((result) {
@@ -563,11 +563,7 @@ class KoreanBooksCubit extends Cubit<KoreanBooksState> {
   
   // Helper methods
   UserEntity? _getCurrentUser() {
-    final authState = authCubit.state;
-    if (authState is Authenticated) {
-      return authState.user;
-    }
-    return null;
+    return authService.getCurrentUser();
   }
   
   List<BookItem> _removeDuplicates(List<BookItem> books) {

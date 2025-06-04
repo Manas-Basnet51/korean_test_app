@@ -2,45 +2,24 @@ import 'dart:io';
 import 'package:korean_language_app/features/books/data/models/book_item.dart';
 
 abstract class KoreanBooksLocalDataSource {
-  Future<List<BookItem>> getCachedKoreanBooks();
-  Future<void> cacheKoreanBooks(List<BookItem> books);
-  Future<bool> hasAnyCachedBooks();
-  Future<int> getCachedBooksCount();
-  Future<void> clearCachedKoreanBooks();
-  Future<void> updateBookMetadata(BookItem book);
-  Future<void> removeBookFromCache(String bookId);
+  Future<List<BookItem>> getAllBooks();
+  Future<void> saveBooks(List<BookItem> books);
+  Future<void> addBook(BookItem book);
+  Future<void> updateBook(BookItem book);
+  Future<void> removeBook(String bookId);
+  Future<void> clearAllBooks();
+  Future<bool> hasAnyBooks();
+  Future<int> getBooksCount();
   
-  // PDF caching
-  Future<File?> getCachedPdfFile(String bookId);
-  Future<void> cachePdfFile(String bookId, File pdfFile);
-  Future<bool> hasCachedPdf(String bookId);
-  Future<void> clearCachedPdf(String bookId);
+  // metadata operations
+  Future<void> setLastSyncTime(DateTime dateTime);
+  Future<DateTime?> getLastSyncTime();
+  Future<void> setBookHashes(Map<String, String> hashes);
+  Future<Map<String, String>> getBookHashes();
   
-  Future<bool> isCacheValid();
-  Future<void> invalidateCache();
-  Future<List<String>> getDeletedBookIds(List<BookItem> remoteBooks);
-  Future<bool> hasBookChanged(BookItem book);
-  Future<void> markBookAsSynced(BookItem book);
-  Future<CacheHealthStatus> checkCacheHealth();
-}
-
-class CacheHealthStatus {
-  final bool isValid;
-  final int bookCount;
-  final bool hasCorruptedEntries;
-  final DateTime? lastSyncTime;
-
-  CacheHealthStatus({
-    required this.isValid,
-    required this.bookCount,
-    required this.hasCorruptedEntries,
-    this.lastSyncTime,
-  });
-
-  bool get isHealthy => isValid && !hasCorruptedEntries && bookCount > 0;
-  
-  @override
-  String toString() {
-    return 'CacheHealthStatus(isValid: $isValid, bookCount: $bookCount, hasCorruptedEntries: $hasCorruptedEntries, lastSyncTime: $lastSyncTime)';
-  }
+  // PDF file operations
+  Future<File?> getPdfFile(String bookId);
+  Future<void> savePdfFile(String bookId, File pdfFile);
+  Future<bool> hasPdfFile(String bookId);
+  Future<void> deletePdfFile(String bookId);
 }

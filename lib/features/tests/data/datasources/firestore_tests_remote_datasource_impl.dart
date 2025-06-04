@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:korean_language_app/core/enums/test_category.dart';
+import 'package:korean_language_app/core/utils/exception_mapper.dart';
 import 'package:korean_language_app/features/tests/data/datasources/tests_remote_datasource.dart';
 import 'package:korean_language_app/features/tests/data/models/test_item.dart';
 import 'package:korean_language_app/features/tests/data/models/test_result.dart';
@@ -56,7 +57,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
         return TestItem.fromJson(data);
       }).toList();
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to fetch tests: $e');
     }
@@ -92,7 +93,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
         return TestItem.fromJson(data);
       }).toList();
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to fetch tests by category: $e');
     }
@@ -116,7 +117,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       
       return currentCount < _totalTestsCount!;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to check for more tests: $e');
     }
@@ -163,7 +164,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       
       return results;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to search tests: $e');
     }
@@ -183,7 +184,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       
       return TestItem.fromJson(data);
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to get test by ID: $e');
     }
@@ -218,7 +219,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       
       return true;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to upload test: $e');
     }
@@ -244,7 +245,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       
       return true;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to update test: $e');
     }
@@ -265,15 +266,13 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       await _deleteAssociatedFiles(data);
       await docRef.delete();
       
-      // Maybe delete all test related results?
-      
       if (_totalTestsCount != null && _totalTestsCount! > 0) {
         _totalTestsCount = _totalTestsCount! - 1;
       }
       
       return true;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to delete test: $e');
     }
@@ -294,7 +293,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       
       return (downloadUrl, storagePath);
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to upload test image: $e');
     }
@@ -317,7 +316,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       
       return null;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to get test last updated: $e');
     }
@@ -335,7 +334,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       
       return downloadUrl;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to regenerate URL: $e');
     }
@@ -394,7 +393,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       
       return true;
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to save test result: $e');
     }
@@ -418,7 +417,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
         return TestResult.fromJson(data);
       }).toList();
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to get user test results: $e');
     }
@@ -442,7 +441,7 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
         return TestResult.fromJson(data);
       }).toList();
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to get test results: $e');
     }
@@ -470,25 +469,9 @@ class FirestoreTestsDataSourceImpl implements TestsRemoteDataSource {
       
       return TestResult.fromJson(data);
     } on FirebaseException catch (e) {
-      throw _mapFirebaseException(e);
+      throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to get user latest result: $e');
-    }
-  }
-
-  Exception _mapFirebaseException(FirebaseException e) {
-    switch (e.code) {
-      case 'permission-denied':
-        return Exception('Permission denied: ${e.message}');
-      case 'not-found':
-        return Exception('Resource not found: ${e.message}');
-      case 'unauthenticated':
-      case 'unauthorized':
-        return Exception('Authentication required: ${e.message}');
-      case 'unavailable':
-        return Exception('Service unavailable: ${e.message}');
-      default:
-        return Exception('Server error: ${e.message}');
     }
   }
 

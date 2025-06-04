@@ -4,9 +4,9 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:equatable/equatable.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:korean_language_app/core/services/auth_service.dart';
 import 'package:korean_language_app/features/auth/domain/entities/user.dart';
 import 'package:korean_language_app/features/book_upload/domain/repositories/book_upload_repository.dart';
-import 'package:korean_language_app/features/auth/presentation/bloc/auth_cubit.dart';
 import 'package:korean_language_app/features/books/data/models/book_item.dart';
 
 part 'file_upload_state.dart';
@@ -15,11 +15,11 @@ enum FileUploadType { pdf, image, media }
 
 class FileUploadCubit extends Cubit<FileUploadState> {
   final BookUploadRepository uploadRepository;
-  final AuthCubit authCubit;
+  final AuthService authService;
   
   FileUploadCubit({
     required this.uploadRepository,
-    required this.authCubit,
+    required this.authService,
   }) : super(FileUploadInitial());
   
   Future<File?> pickPdfFile() async {
@@ -279,11 +279,7 @@ class FileUploadCubit extends Cubit<FileUploadState> {
   }
   
   UserEntity? _getCurrentUser() {
-    final authState = authCubit.state;
-    if (authState is Authenticated) {
-      return authState.user;
-    }
-    return null;
+    return authService.getCurrentUser();
   }
   
   void resetState() {

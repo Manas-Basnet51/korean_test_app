@@ -6,10 +6,9 @@ import 'package:korean_language_app/core/data/base_state.dart';
 import 'package:korean_language_app/core/enums/book_level.dart';
 import 'package:korean_language_app/core/enums/test_category.dart';
 import 'package:korean_language_app/core/errors/api_result.dart';
-import 'package:korean_language_app/core/extensions/api_result_ext.dart';
+import 'package:korean_language_app/core/services/auth_service.dart';
 import 'package:korean_language_app/features/admin/data/service/admin_permission.dart';
 import 'package:korean_language_app/features/auth/domain/entities/user.dart';
-import 'package:korean_language_app/features/auth/presentation/bloc/auth_cubit.dart';
 import 'package:korean_language_app/features/tests/data/models/test_item.dart';
 import 'package:korean_language_app/features/tests/data/models/test_result.dart';
 import 'package:korean_language_app/features/tests/domain/repositories/tests_repository.dart';
@@ -18,7 +17,7 @@ part 'tests_state.dart';
 
 class TestsCubit extends Cubit<TestsState> {
   final TestsRepository repository;
-  final AuthCubit authCubit;
+  final AuthService authService;
   final AdminPermissionService adminService;
   
   int _currentPage = 0;
@@ -34,7 +33,7 @@ class TestsCubit extends Cubit<TestsState> {
   
   TestsCubit({
     required this.repository,
-    required this.authCubit,
+    required this.authService,
     required this.adminService,
   }) : super(const TestsInitial()) {
     _initializeConnectivityListener();
@@ -831,11 +830,7 @@ class TestsCubit extends Cubit<TestsState> {
   
   // Helper methods
   UserEntity? _getCurrentUser() {
-    final authState = authCubit.state;
-    if (authState is Authenticated) {
-      return authState.user;
-    }
-    return null;
+    return authService.getCurrentUser();
   }
   
   List<TestItem> _removeDuplicates(List<TestItem> tests) {

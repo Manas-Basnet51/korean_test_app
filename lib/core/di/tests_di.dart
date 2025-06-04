@@ -10,8 +10,8 @@ import 'package:korean_language_app/features/tests/presentation/bloc/tests_cubit
 
 void registerTestsDependencies(GetIt sl) {
   // Cubits
-  sl.registerFactory(() => TestsCubit(repository: sl(), authCubit: sl(),adminService: sl()));
-  sl.registerFactory(() => TestSessionCubit(repository: sl(), authCubit: sl()));
+  sl.registerFactory(() => TestsCubit(repository: sl(), authService: sl(),adminService: sl()));
+  sl.registerFactory(() => TestSessionCubit(repository: sl(), authService: sl()));
   
   // Repository
   sl.registerLazySingleton<TestsRepository>(
@@ -23,6 +23,6 @@ void registerTestsDependencies(GetIt sl) {
     () => FirestoreTestsDataSourceImpl(firestore: sl(), storage: sl()),
   );
   sl.registerLazySingleton<TestsLocalDataSource>(
-    () => TestsLocalDataSourceImpl(sharedPreferences: sl()),
+    () => TestsLocalDataSourceImpl(storageService: sl()),
   );
 }

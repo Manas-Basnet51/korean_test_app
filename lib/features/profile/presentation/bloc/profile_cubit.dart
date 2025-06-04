@@ -1,17 +1,17 @@
 import 'dart:async';
 import 'dart:developer';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:korean_language_app/core/data/base_state.dart';
 import 'package:korean_language_app/core/errors/api_result.dart';
-import 'package:korean_language_app/core/extensions/api_result_ext.dart';
+import 'package:korean_language_app/core/services/auth_service.dart';
+import 'package:korean_language_app/features/auth/domain/entities/user.dart';
 import 'package:korean_language_app/features/profile/domain/repositories/profile_repository.dart';
 import 'package:korean_language_app/features/profile/data/models/profile_model.dart';
 part 'profile_state.dart';
 
 class ProfileCubit extends Cubit<ProfileState> {
   final ProfileRepository profileRepository;
-  final FirebaseAuth auth;
+  final AuthService authService;
   
   bool _isStorageAvailable = true;
   ProfileLoaded? _cachedProfile;
@@ -25,7 +25,7 @@ class ProfileCubit extends Cubit<ProfileState> {
 
   ProfileCubit({
     required this.profileRepository,
-    required this.auth,
+    required this.authService,
   }) : super(ProfileInitial()) {
     _checkStorageAvailability();
     loadProfile();
@@ -39,13 +39,17 @@ class ProfileCubit extends Cubit<ProfileState> {
     );
   }
 
+  UserEntity? _getCurrentUser() {
+    return authService.getCurrentUser();
+  }
+
   Future<void> loadProfile() async {
     try {
       if (_cachedProfile == null) {
         emit(const ProfileState(isLoading: true));
       }
       
-      final currentUser = auth.currentUser;
+      final currentUser = _getCurrentUser();
       if (currentUser == null) {
         emit(const ProfileState(error: 'User not authenticated', errorType: FailureType.auth));
         return;

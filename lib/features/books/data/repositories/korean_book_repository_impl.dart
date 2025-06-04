@@ -4,6 +4,7 @@ import 'package:korean_language_app/core/data/base_repository.dart';
 import 'package:korean_language_app/core/enums/course_category.dart';
 import 'package:korean_language_app/core/errors/api_result.dart';
 import 'package:korean_language_app/core/network/network_info.dart';
+import 'package:korean_language_app/core/utils/exception_mapper.dart';
 import 'package:korean_language_app/features/books/data/datasources/korean_books_local_datasource.dart';
 import 'package:korean_language_app/features/books/data/datasources/korean_books_remote_data_source.dart';
 import 'package:korean_language_app/features/books/domain/repositories/korean_book_repository.dart';
@@ -14,7 +15,8 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
   final KoreanBooksRemoteDataSource remoteDataSource;
   final KoreanBooksLocalDataSource localDataSource;
   
-  // Retry configuration
+  // Caching configuration
+  static const Duration cacheValidityDuration = Duration(hours: 1);
   static const int maxRetries = 3;
   static const Duration initialRetryDelay = Duration(seconds: 1);
 
@@ -35,7 +37,7 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
     }
 
     return _executeWithRetry(() async {
-      // For pagination beyond first page, always fetching from remote
+      // For pagination beyond first page, always fetch from remote
       if (page > 0) {
         if (!await networkInfo.isConnected) {
           throw Exception('No internet connection for pagination');
@@ -44,9 +46,10 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
       }
 
       // Check cache validity for first page
-      if (await localDataSource.isCacheValid()) {
-        final cachedBooks = await localDataSource.getCachedKoreanBooks();
-        if (cachedBooks.isNotEmpty) {
+      if (await _isCacheValid()) {
+        final cachedBooks = await localDataSource.getAllBooks();
+        if (cachedBooks.isNotEmpty && _areValidBooks(cachedBooks)) {
+          dev.log('Returning ${cachedBooks.length} books from valid cache');
           return cachedBooks;
         }
       }
@@ -59,8 +62,9 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
   @override
   Future<ApiResult<List<BookItem>>> getBooksFromCache() async {
     try {
-      final books = await localDataSource.getCachedKoreanBooks();
-      return ApiResult.success(books);
+      final books = await localDataSource.getAllBooks();
+      final validBooks = _filterValidBooks(books);
+      return ApiResult.success(validBooks);
     } catch (e) {
       return ApiResult.failure('Failed to get cached books: $e', FailureType.cache);
     }
@@ -74,7 +78,7 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
     
     if (!await networkInfo.isConnected) {
       try {
-        final totalCached = await localDataSource.getCachedBooksCount();
+        final totalCached = await localDataSource.getBooksCount();
         return ApiResult.success(currentCount < totalCached);
       } catch (e) {
         return ApiResult.success(false);
@@ -96,10 +100,7 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
     }
 
     return _executeWithRetry(() async {
-      // Clear cache first
-      await localDataSource.clearCachedKoreanBooks();
-      
-      // Fetch fresh data
+      await _invalidateCache();
       return await _fetchAndCacheBooks(pageSize: pageSize);
     });
   }
@@ -112,8 +113,8 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
 
     try {
       // Always search in cache first for better UX
-      final cachedBooks = await localDataSource.getCachedKoreanBooks();
-      final cachedResults = _searchInCache(cachedBooks, query);
+      final cachedBooks = await localDataSource.getAllBooks();
+      final cachedResults = _searchInBooks(cachedBooks, query);
       
       if (!await networkInfo.isConnected) {
         return ApiResult.success(cachedResults);
@@ -125,7 +126,7 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
         
         // Cache new search results
         if (remoteResults.isNotEmpty) {
-          await localDataSource.cacheKoreanBooks(remoteResults);
+          await _updateCacheWithNewBooks(remoteResults);
         }
         
         // Combine and deduplicate results
@@ -136,11 +137,11 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
     } catch (e) {
       // Return cached results if remote search fails
       try {
-        final cachedBooks = await localDataSource.getCachedKoreanBooks();
-        final cachedResults = _searchInCache(cachedBooks, query);
+        final cachedBooks = await localDataSource.getAllBooks();
+        final cachedResults = _searchInBooks(cachedBooks, query);
         return ApiResult.success(cachedResults);
       } catch (cacheError) {
-        return _mapExceptionToApiResult(e as Exception);
+        return ExceptionMapper.mapExceptionToApiResult(e as Exception);
       }
     }
   }
@@ -148,7 +149,7 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
   @override
   Future<ApiResult<void>> clearCachedBooks() async {
     try {
-      await localDataSource.clearCachedKoreanBooks();
+      await localDataSource.clearAllBooks();
       return ApiResult.success(null);
     } catch (e) {
       return ApiResult.failure('Failed to clear cache: $e', FailureType.cache);
@@ -158,14 +159,14 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
   @override
   Future<ApiResult<File?>> getBookPdf(String bookId) async {
     try {
-      // Check cached PDF first with validation
-      final cachedPdf = await localDataSource.getCachedPdfFile(bookId);
-      if (cachedPdf != null && await _isValidPDF(cachedPdf)) {
+      // Check cached PDF first
+      final cachedPdf = await localDataSource.getPdfFile(bookId);
+      if (cachedPdf != null) {
         return ApiResult.success(cachedPdf);
       }
 
       if (!await networkInfo.isConnected) {
-        return ApiResult.failure('No internet connection and no valid cached PDF', FailureType.network);
+        return ApiResult.failure('No internet connection and no cached PDF', FailureType.network);
       }
 
       // Download and cache PDF with retry
@@ -174,7 +175,7 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
       });
       
     } catch (e) {
-      return _mapExceptionToApiResult(e as Exception);
+      return ExceptionMapper.mapExceptionToApiResult(e as Exception);
     }
   }
 
@@ -189,7 +190,8 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
       
       if (success) {
         try {
-          await localDataSource.updateBookMetadata(book);
+          await localDataSource.updateBook(book);
+          await _updateBookHash(book);
         } catch (e) {
           dev.log('Failed to update local cache: $e');
         }
@@ -210,8 +212,9 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
       
       if (success) {
         try {
-          await localDataSource.removeBookFromCache(bookId);
-          await localDataSource.clearCachedPdf(bookId);
+          await localDataSource.removeBook(bookId);
+          await localDataSource.deletePdfFile(bookId);
+          await _removeBookHash(bookId);
         } catch (e) {
           dev.log('Failed to remove from cache: $e');
         }
@@ -245,8 +248,10 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
       
       if (success) {
         try {
-          await localDataSource.cacheKoreanBooks([updatedBook]);
-          await localDataSource.cachePdfFile(book.id, pdfFile);
+          await localDataSource.addBook(updatedBook);
+          await localDataSource.savePdfFile(book.id, pdfFile);
+          await _updateBookHash(updatedBook);
+          await _updateLastSyncTime();
         } catch (e) {
           dev.log('Failed to cache after upload: $e');
         }
@@ -295,8 +300,9 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
         final updatedBook = book.copyWith(bookImage: newUrl);
         
         try {
-          await localDataSource.updateBookMetadata(updatedBook);
+          await localDataSource.updateBook(updatedBook);
           await remoteDataSource.updateBook(book.id, updatedBook);
+          await _updateBookHash(updatedBook);
         } catch (e) {
           dev.log('Failed to update book with new image URL: $e');
         }
@@ -306,38 +312,29 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
     });
   }
 
-  // Private helper methods
-  Future<ApiResult<T>> _executeWithRetry<T>(Future<T> Function() operation) async {
-    Exception? lastException;
-    
-    for (int attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        final result = await operation();
-        return ApiResult.success(result);
-      } catch (e) {
-        lastException = e as Exception;
-        
-        if (attempt == maxRetries) {
-          break;
-        }
-        
-        // Exponential backoff
-        final delay = Duration(seconds: initialRetryDelay.inSeconds * attempt);
-        await Future.delayed(delay);
-        
-        dev.log('Retry attempt $attempt failed: $e. Retrying in ${delay.inSeconds}s...');
-      }
+  // Private caching methods
+  Future<bool> _isCacheValid() async {
+    try {
+      final lastSyncTime = await localDataSource.getLastSyncTime();
+      if (lastSyncTime == null) return false;
+      
+      final cacheAge = DateTime.now().difference(lastSyncTime);
+      return cacheAge < cacheValidityDuration;
+    } catch (e) {
+      return false;
     }
-    
-    return _mapExceptionToApiResult(lastException!);
+  }
+
+  Future<void> _invalidateCache() async {
+    await localDataSource.clearAllBooks();
   }
 
   Future<List<BookItem>> _fetchAndCacheBooks({required int pageSize}) async {
     if (!await networkInfo.isConnected) {
       // Try to return cached data as fallback
-      final cachedBooks = await localDataSource.getCachedKoreanBooks();
+      final cachedBooks = await localDataSource.getAllBooks();
       if (cachedBooks.isNotEmpty) {
-        return cachedBooks;
+        return _filterValidBooks(cachedBooks);
       }
       throw Exception('No internet connection and no cached data');
     }
@@ -345,18 +342,100 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
     final remoteBooks = await remoteDataSource.getKoreanBooks(page: 0, pageSize: pageSize);
     
     // Detect deleted books for cache sync
-    final deletedIds = await localDataSource.getDeletedBookIds(remoteBooks);
+    final deletedIds = await _getDeletedBookIds(remoteBooks);
     for (final deletedId in deletedIds) {
-      await localDataSource.removeBookFromCache(deletedId);
+      await localDataSource.removeBook(deletedId);
     }
     
     // Cache new/updated books
-    await localDataSource.cacheKoreanBooks(remoteBooks);
+    await _cacheBooks(remoteBooks);
     
     return remoteBooks;
   }
 
-  List<BookItem> _searchInCache(List<BookItem> books, String query) {
+  Future<void> _cacheBooks(List<BookItem> books) async {
+    try {
+      final existingBooks = await localDataSource.getAllBooks();
+      final mergedBooks = _mergeBooks(existingBooks, books);
+      
+      await localDataSource.saveBooks(mergedBooks);
+      await _updateLastSyncTime();
+      await _updateBooksHashes(mergedBooks);
+    } catch (e) {
+      dev.log('Failed to cache books: $e');
+    }
+  }
+
+  Future<void> _updateCacheWithNewBooks(List<BookItem> newBooks) async {
+    try {
+      for (final book in newBooks) {
+        await localDataSource.addBook(book);
+        await _updateBookHash(book);
+      }
+    } catch (e) {
+      dev.log('Failed to update cache with new books: $e');
+    }
+  }
+
+  Future<void> _updateLastSyncTime() async {
+    await localDataSource.setLastSyncTime(DateTime.now());
+  }
+
+  Future<void> _updateBooksHashes(List<BookItem> books) async {
+    final hashes = <String, String>{};
+    for (final book in books) {
+      hashes[book.id] = _generateBookHash(book);
+    }
+    await localDataSource.setBookHashes(hashes);
+  }
+
+  Future<void> _updateBookHash(BookItem book) async {
+    final currentHashes = await localDataSource.getBookHashes();
+    currentHashes[book.id] = _generateBookHash(book);
+    await localDataSource.setBookHashes(currentHashes);
+  }
+
+  Future<void> _removeBookHash(String bookId) async {
+    final currentHashes = await localDataSource.getBookHashes();
+    currentHashes.remove(bookId);
+    await localDataSource.setBookHashes(currentHashes);
+  }
+
+  Future<List<String>> _getDeletedBookIds(List<BookItem> remoteBooks) async {
+    try {
+      final cachedBooks = await localDataSource.getAllBooks();
+      final remoteBookIds = remoteBooks.map((book) => book.id).toSet();
+      
+      final deletedIds = cachedBooks
+          .where((book) => !remoteBookIds.contains(book.id))
+          .map((book) => book.id)
+          .toList();
+      
+      return deletedIds;
+    } catch (e) {
+      dev.log('Error detecting deleted books: $e');
+      return [];
+    }
+  }
+
+  List<BookItem> _mergeBooks(List<BookItem> existing, List<BookItem> newBooks) {
+    final Map<String, BookItem> bookMap = {};
+    
+    for (final book in existing) {
+      bookMap[book.id] = book;
+    }
+    
+    for (final book in newBooks) {
+      bookMap[book.id] = book;
+    }
+    
+    final mergedBooks = bookMap.values.toList();
+    mergedBooks.sort((a, b) => a.title.compareTo(b.title));
+    
+    return mergedBooks;
+  }
+
+  List<BookItem> _searchInBooks(List<BookItem> books, String query) {
     final normalizedQuery = query.toLowerCase();
     
     return books.where((book) {
@@ -383,6 +462,27 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
     }
     
     return uniqueBooks.values.toList();
+  }
+
+  List<BookItem> _filterValidBooks(List<BookItem> books) {
+    return books.where((book) => 
+      book.id.isNotEmpty && 
+      book.title.isNotEmpty && 
+      book.description.isNotEmpty
+    ).toList();
+  }
+
+  bool _areValidBooks(List<BookItem> books) {
+    return books.every((book) => 
+      book.id.isNotEmpty && 
+      book.title.isNotEmpty && 
+      book.description.isNotEmpty
+    );
+  }
+
+  String _generateBookHash(BookItem book) {
+    final content = '${book.title}_${book.description}_${book.updatedAt?.millisecondsSinceEpoch ?? 0}';
+    return content.hashCode.toString();
   }
 
   Future<File?> _downloadAndCachePdf(String bookId) async {
@@ -412,9 +512,9 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
         throw Exception('Downloaded file is not a valid PDF');
       }
 
-      // Cache the PDF
+      // Cache the PDF using local datasource
       try {
-        await localDataSource.cachePdfFile(bookId, downloadedFile);
+        await localDataSource.savePdfFile(bookId, downloadedFile);
       } catch (e) {
         dev.log('Failed to cache PDF: $e');
       }
@@ -427,28 +527,9 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
       }
 
       // Return cached PDF
-      return await localDataSource.getCachedPdfFile(bookId);
+      return await localDataSource.getPdfFile(bookId);
     } catch (e) {
       throw Exception('Error downloading PDF: $e');
-    }
-  }
-
-  Future<void> _updateBookImageInCache(String bookId, String imageUrl, String imagePath) async {
-    try {
-      final cachedBooks = await localDataSource.getCachedKoreanBooks();
-      final bookIndex = cachedBooks.indexWhere((b) => b.id == bookId);
-      
-      if (bookIndex != -1) {
-        final updatedBook = cachedBooks[bookIndex].copyWith(
-          bookImage: imageUrl,
-          bookImagePath: imagePath,
-        );
-        
-        await localDataSource.updateBookMetadata(updatedBook);
-        await remoteDataSource.updateBook(bookId, updatedBook);
-      }
-    } catch (e) {
-      dev.log('Error updating book image in cache: $e');
     }
   }
 
@@ -471,23 +552,45 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
     }
   }
 
-  ApiResult<T> _mapExceptionToApiResult<T>(Exception e) {
-    final message = e.toString();
-    
-    if (message.contains('Permission denied')) {
-      return ApiResult.failure(message, FailureType.permission);
-    } else if (message.contains('not found') || message.contains('Resource not found')) {
-      return ApiResult.failure(message, FailureType.notFound);
-    } else if (message.contains('Authentication required')) {
-      return ApiResult.failure(message, FailureType.auth);
-    } else if (message.contains('Service unavailable') || message.contains('Server error')) {
-      return ApiResult.failure(message, FailureType.server);
-    } else if (message.contains('No internet connection')) {
-      return ApiResult.failure(message, FailureType.network);
-    } else if (message.contains('validation') || message.contains('cannot be empty')) {
-      return ApiResult.failure(message, FailureType.validation);
-    } else {
-      return ApiResult.failure(message, FailureType.unknown);
+  Future<void> _updateBookImageInCache(String bookId, String imageUrl, String imagePath) async {
+    try {
+      final books = await localDataSource.getAllBooks();
+      final book = books.firstWhere((b) => b.id == bookId);
+      
+      final updatedBook = book.copyWith(
+        bookImage: imageUrl,
+        bookImagePath: imagePath,
+      );
+      
+      await localDataSource.updateBook(updatedBook);
+      await remoteDataSource.updateBook(bookId, updatedBook);
+      await _updateBookHash(updatedBook);
+    } catch (e) {
+      dev.log('Error updating book image in cache: $e');
     }
+  }
+
+  Future<ApiResult<T>> _executeWithRetry<T>(Future<T> Function() operation) async {
+    Exception? lastException;
+    
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        final result = await operation();
+        return ApiResult.success(result);
+      } catch (e) {
+        lastException = e as Exception;
+        
+        if (attempt == maxRetries) {
+          break;
+        }
+        
+        final delay = Duration(seconds: initialRetryDelay.inSeconds * attempt);
+        await Future.delayed(delay);
+        
+        dev.log('Retry attempt $attempt failed: $e. Retrying in ${delay.inSeconds}s...');
+      }
+    }
+    
+    return ExceptionMapper.mapExceptionToApiResult(lastException!);
   }
 }

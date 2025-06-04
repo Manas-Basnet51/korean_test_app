@@ -1,11 +1,11 @@
-class CacheHealthStatus {
+class TestCacheHealthStatus {
   final bool isValid;
   final int testsCount;
   final int resultsCount;
   final bool hasCorruptedEntries;
   final DateTime? lastSyncTime;
 
-  CacheHealthStatus({
+  TestCacheHealthStatus({
     required this.isValid,
     required this.testsCount,
     required this.resultsCount,
@@ -17,6 +17,6 @@ class CacheHealthStatus {
   
   @override
   String toString() {
-    return 'CacheHealthStatus(isValid: $isValid, testsCount: $testsCount, resultsCount: $resultsCount, hasCorruptedEntries: $hasCorruptedEntries, lastSyncTime: $lastSyncTime)';
+    return 'TestCacheHealthStatus(isValid: $isValid, testsCount: $testsCount, resultsCount: $resultsCount, hasCorruptedEntries: $hasCorruptedEntries, lastSyncTime: $lastSyncTime)';
   }
 }

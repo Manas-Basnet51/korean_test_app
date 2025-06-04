@@ -8,7 +8,7 @@ import 'package:korean_language_app/features/profile/presentation/bloc/profile_c
 
 void registerProfileDependencies(GetIt sl) {
   // Cubits
-  sl.registerFactory(() => ProfileCubit(profileRepository: sl(), auth: sl()));
+  sl.registerFactory(() => ProfileCubit(profileRepository: sl(), authService: sl()));
   
   // Repository
   sl.registerLazySingleton<ProfileRepository>(
