@@ -3,14 +3,18 @@ import 'package:korean_language_app/core/errors/api_result.dart';
 import 'package:korean_language_app/features/tests/data/models/test_item.dart';
 
 abstract class TestUploadRepository {
-  // Test CRUD operations
-  Future<ApiResult<TestItem>> createTest(TestItem test);
-  Future<ApiResult<bool>> updateTest(String testId, TestItem updatedTest);
+  /// Create test with optional image - atomic operation
+  Future<ApiResult<TestItem>> createTest(TestItem test, {File? imageFile});
+  
+  /// Update test with optional new image - atomic operation
+  Future<ApiResult<TestItem>> updateTest(String testId, TestItem updatedTest, {File? imageFile});
+  
+  /// Delete test and all associated files
   Future<ApiResult<bool>> deleteTest(String testId);
-  Future<ApiResult<Map<String, dynamic>>> uploadTestImage(String testId, File imageFile);
+  
+  /// Regenerate image URL from storage path if needed
   Future<ApiResult<String?>> regenerateImageUrl(TestItem test);
   
-  // Permission checks
   Future<ApiResult<bool>> hasEditPermission(String testId, String userId);
   Future<ApiResult<bool>> hasDeletePermission(String testId, String userId);
 }

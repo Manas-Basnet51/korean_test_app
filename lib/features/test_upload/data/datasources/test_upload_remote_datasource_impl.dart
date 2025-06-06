@@ -17,33 +17,54 @@ class FirestoreTestUploadDataSourceImpl implements TestUploadRemoteDataSource {
   });
 
   @override
-  Future<TestItem> uploadTest(TestItem test) async {
+  Future<TestItem> uploadTest(TestItem test, {File? imageFile}) async {
     try {
       if (test.title.isEmpty || test.description.isEmpty || test.questions.isEmpty) {
         throw ArgumentError('Test title, description, and questions cannot be empty');
       }
       
+      // Generate new document reference to get ID
       final docRef = test.id.isEmpty 
           ? firestore.collection(testsCollection).doc() 
           : firestore.collection(testsCollection).doc(test.id);
       
-      final testData = test.toJson();
-      if (test.id.isEmpty) {
-        testData['id'] = docRef.id;
+      final testId = docRef.id;
+      var finalTest = test.copyWith(id: testId);
+      
+      String? uploadedImagePath;
+      
+      try {
+        // Upload image first if provided
+        if (imageFile != null) {
+          final (imageUrl, imagePath) = await _uploadTestImage(testId, imageFile);
+          uploadedImagePath = imagePath;
+          finalTest = finalTest.copyWith(
+            imageUrl: imageUrl,
+            imagePath: imagePath,
+          );
+        }
+        
+        // Now create the test document with all data
+        final testData = finalTest.toJson();
+        testData['titleLowerCase'] = finalTest.title.toLowerCase();
+        testData['descriptionLowerCase'] = finalTest.description.toLowerCase();
+        testData['createdAt'] = FieldValue.serverTimestamp();
+        testData['updatedAt'] = FieldValue.serverTimestamp();
+        
+        await docRef.set(testData);
+        
+        return finalTest.copyWith(
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        );
+        
+      } catch (e) {
+        // Clean up uploaded image on failure
+        if (uploadedImagePath != null) {
+          await _deleteImageByPath(uploadedImagePath);
+        }
+        throw Exception('Failed to create test: $e');
       }
-      
-      testData['titleLowerCase'] = test.title.toLowerCase();
-      testData['descriptionLowerCase'] = test.description.toLowerCase();
-      testData['createdAt'] = FieldValue.serverTimestamp();
-      testData['updatedAt'] = FieldValue.serverTimestamp();
-      
-      await docRef.set(testData);
-      
-      return test.copyWith(
-        id: docRef.id,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      );
     } on FirebaseException catch (e) {
       throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
@@ -52,7 +73,7 @@ class FirestoreTestUploadDataSourceImpl implements TestUploadRemoteDataSource {
   }
 
   @override
-  Future<bool> updateTest(String testId, TestItem updatedTest) async {
+  Future<TestItem> updateTest(String testId, TestItem updatedTest, {File? imageFile}) async {
     try {
       final docRef = firestore.collection(testsCollection).doc(testId);
       final docSnapshot = await docRef.get();
@@ -61,15 +82,46 @@ class FirestoreTestUploadDataSourceImpl implements TestUploadRemoteDataSource {
         throw Exception('Test not found');
       }
       
-      final updateData = updatedTest.toJson();
+      final existingData = docSnapshot.data() as Map<String, dynamic>;
+      var finalTest = updatedTest;
       
-      updateData['titleLowerCase'] = updatedTest.title.toLowerCase();
-      updateData['descriptionLowerCase'] = updatedTest.description.toLowerCase();
-      updateData['updatedAt'] = FieldValue.serverTimestamp();
+      String? newImagePath;
+      String? oldImagePath = existingData['imagePath'] as String?;
       
-      await docRef.update(updateData);
-      
-      return true;
+      try {
+        // Upload new image if provided
+        if (imageFile != null) {
+          final (imageUrl, imagePath) = await _uploadTestImage(testId, imageFile);
+          newImagePath = imagePath;
+          finalTest = finalTest.copyWith(
+            imageUrl: imageUrl,
+            imagePath: imagePath,
+          );
+        }
+        
+        // Update the document
+        final updateData = finalTest.toJson();
+        updateData['titleLowerCase'] = finalTest.title.toLowerCase();
+        updateData['descriptionLowerCase'] = finalTest.description.toLowerCase();
+        updateData['updatedAt'] = FieldValue.serverTimestamp();
+        
+        await docRef.update(updateData);
+        
+        // Only delete old image after successful update
+        if (newImagePath != null && oldImagePath != null && oldImagePath != newImagePath) {
+          await _deleteImageByPath(oldImagePath);
+        }
+        
+        // Return the updated test with current timestamp
+        return finalTest.copyWith(updatedAt: DateTime.now());
+        
+      } catch (e) {
+        // Clean up newly uploaded image on failure
+        if (newImagePath != null) {
+          await _deleteImageByPath(newImagePath);
+        }
+        rethrow;
+      }
     } on FirebaseException catch (e) {
       throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
@@ -89,7 +141,10 @@ class FirestoreTestUploadDataSourceImpl implements TestUploadRemoteDataSource {
       
       final data = docSnapshot.data() as Map<String, dynamic>;
       
+      // Delete associated files first
       await _deleteAssociatedFiles(data);
+      
+      // Then delete the document
       await docRef.delete();
       
       return true;
@@ -97,27 +152,6 @@ class FirestoreTestUploadDataSourceImpl implements TestUploadRemoteDataSource {
       throw ExceptionMapper.mapFirebaseException(e);
     } catch (e) {
       throw Exception('Failed to delete test: $e');
-    }
-  }
-
-  @override
-  Future<(String, String)?> uploadTestImage(String testId, File imageFile) async {
-    try {
-      final storagePath = 'tests/$testId/test_image.jpg';
-      final fileRef = storage.ref().child(storagePath);
-      
-      final uploadTask = await fileRef.putFile(
-        imageFile,
-        SettableMetadata(contentType: 'image/jpeg')
-      );
-      
-      final downloadUrl = await uploadTask.ref.getDownloadURL();
-      
-      return (downloadUrl, storagePath);
-    } on FirebaseException catch (e) {
-      throw ExceptionMapper.mapFirebaseException(e);
-    } catch (e) {
-      throw Exception('Failed to upload test image: $e');
     }
   }
 
@@ -187,13 +221,61 @@ class FirestoreTestUploadDataSourceImpl implements TestUploadRemoteDataSource {
     }
   }
 
+  /// Private helper method to upload test image atomically
+  Future<(String, String)> _uploadTestImage(String testId, File imageFile) async {
+    try {
+      final storagePath = 'tests/$testId/test_image.jpg';
+      final fileRef = storage.ref().child(storagePath);
+      
+      final uploadTask = await fileRef.putFile(
+        imageFile,
+        SettableMetadata(contentType: 'image/jpeg')
+      );
+      
+      final downloadUrl = await uploadTask.ref.getDownloadURL();
+      
+      if (downloadUrl.isEmpty) {
+        throw Exception('Failed to get download URL for uploaded image');
+      }
+      
+      return (downloadUrl, storagePath);
+    } catch (e) {
+      throw Exception('Image upload failed: $e');
+    }
+  }
+
+  /// Private helper method to delete image by storage path
+  Future<void> _deleteImageByPath(String storagePath) async {
+    try {
+      if (storagePath.isNotEmpty) {
+        final fileRef = storage.ref().child(storagePath);
+        await fileRef.delete();
+      }
+    } catch (e) {
+      // Log but don't throw - deletion of old image shouldn't block update
+      if (kDebugMode) {
+        print('Failed to delete image at $storagePath: $e');
+      }
+    }
+  }
+
+  /// Private helper method to delete all associated files
   Future<void> _deleteAssociatedFiles(Map<String, dynamic> data) async {
+    // Delete image by path if exists
+    if (data.containsKey('imagePath') && data['imagePath'] != null) {
+      await _deleteImageByPath(data['imagePath'] as String);
+    }
+    
+    // Fallback: delete by URL
     if (data.containsKey('imageUrl') && data['imageUrl'] != null) {
       try {
         final imageRef = storage.refFromURL(data['imageUrl'] as String);
         await imageRef.delete();
       } catch (e) {
         // Log but continue
+        if (kDebugMode) {
+          print('Failed to delete image by URL: $e');
+        }
       }
     }
   }

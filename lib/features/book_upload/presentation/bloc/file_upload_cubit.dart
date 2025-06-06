@@ -91,6 +91,7 @@ class FileUploadCubit extends Cubit<FileUploadState> {
     return null;
   }
   
+  /// Upload book with PDF and optional cover image atomically
   Future<bool> uploadBook(BookItem book, File pdfFile, File? imageFile) async {
     final isConnected = await _checkConnectivity();
     if (!isConnected) {
@@ -116,45 +117,22 @@ class FileUploadCubit extends Cubit<FileUploadState> {
         updatedAt: DateTime.now(),
       );
       
-      emit(const FileUploading(0.3, FileUploadType.pdf));
+      emit(const FileUploading(0.5, FileUploadType.pdf));
       
-      final pdfResult = await uploadRepository.uploadPdfFile(newBookId, pdfFile);
-      
-      if (pdfResult.isFailure) {
-        emit(FileUploadError(pdfResult.error ?? 'Failed to upload PDF file', FileUploadType.pdf));
-        return false;
-      }
-      
-      final pdfData = pdfResult.data ?? {};
-      BookItem updatedBook = bookWithId.copyWith(
-        pdfUrl: pdfData['url'],
-        pdfPath: pdfData['storagePath'],
+      // Upload book with all files atomically
+      final result = await uploadRepository.createBook(
+        bookWithId, 
+        pdfFile, 
+        coverImageFile: imageFile,
       );
       
-      if (imageFile != null) {
-        emit(const FileUploading(0.6, FileUploadType.pdf));
-        final imageResult = await uploadRepository.uploadCoverImage(newBookId, imageFile);
-        
-        if (imageResult.isSuccess) {
-          final imageData = imageResult.data ?? {};
-          updatedBook = updatedBook.copyWith(
-            bookImage: imageData['url'],
-            bookImagePath: imageData['storagePath'],
-          );
-        }
-      }
-      
-      emit(const FileUploading(0.8, FileUploadType.pdf));
-      
-      final createResult = await uploadRepository.createBook(updatedBook);
-      
-      if (createResult.isFailure) {
-        emit(FileUploadError(createResult.error ?? 'Failed to upload book metadata', FileUploadType.pdf));
+      if (result.isFailure) {
+        emit(FileUploadError(result.error ?? 'Failed to upload book', FileUploadType.pdf));
         return false;
       }
       
-      final finalBook = createResult.data ?? updatedBook;
-      emit(FileUploadSuccess(newBookId, FileUploadType.pdf, book: finalBook));
+      final createdBook = result.data!;
+      emit(FileUploadSuccess(createdBook.id, FileUploadType.pdf, book: createdBook));
       return true;
     } catch (e) {
       emit(FileUploadError('Upload failed: $e', FileUploadType.pdf));
@@ -162,6 +140,7 @@ class FileUploadCubit extends Cubit<FileUploadState> {
     }
   }
   
+  /// Update book with optional new PDF and/or cover image atomically
   Future<bool> updateBook(String bookId, BookItem updatedBook, {File? pdfFile, File? imageFile}) async {
     final isConnected = await _checkConnectivity();
     if (!isConnected) {
@@ -184,46 +163,26 @@ class FileUploadCubit extends Cubit<FileUploadState> {
       
       emit(const FileUploading(0.1, FileUploadType.pdf));
       
-      var updatedBookWithMeta = updatedBook.copyWith(
+      final updatedBookWithMeta = updatedBook.copyWith(
         updatedAt: DateTime.now(),
       );
       
-      if (pdfFile != null) {
-        emit(const FileUploading(0.3, FileUploadType.pdf));
-        final pdfResult = await uploadRepository.uploadPdfFile(bookId, pdfFile);
-        
-        if (pdfResult.isSuccess) {
-          final pdfData = pdfResult.data ?? {};
-          updatedBookWithMeta = updatedBookWithMeta.copyWith(
-            pdfUrl: pdfData['url'],
-            pdfPath: pdfData['storagePath'],
-          );
-        }
-      }
+      emit(const FileUploading(0.5, FileUploadType.pdf));
       
-      if (imageFile != null) {
-        emit(const FileUploading(0.6, FileUploadType.pdf));
-        final imageResult = await uploadRepository.uploadCoverImage(bookId, imageFile);
-        
-        if (imageResult.isSuccess) {
-          final imageData = imageResult.data ?? {};
-          updatedBookWithMeta = updatedBookWithMeta.copyWith(
-            bookImage: imageData['url'],
-            bookImagePath: imageData['storagePath'],
-          );
-        }
-      }
+      // Update book with all files atomically
+      final result = await uploadRepository.updateBook(
+        bookId, 
+        updatedBookWithMeta,
+        pdfFile: pdfFile,
+        coverImageFile: imageFile,
+      );
       
-      emit(const FileUploading(0.8, FileUploadType.pdf));
-      
-      final updateResult = await uploadRepository.updateBook(bookId, updatedBookWithMeta);
-      
-      if (updateResult.isFailure) {
-        emit(FileUploadError(updateResult.error ?? 'Failed to update book metadata', FileUploadType.pdf));
+      if (result.isFailure) {
+        emit(FileUploadError(result.error ?? 'Failed to update book', FileUploadType.pdf));
         return false;
       }
       
-      final finalBook = updateResult.data ?? updatedBookWithMeta;
+      final finalBook = result.data!;
       emit(FileUploadSuccess(bookId, FileUploadType.pdf, book: finalBook));
       return true;
     } catch (e) {

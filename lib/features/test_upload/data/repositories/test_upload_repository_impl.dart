@@ -18,21 +18,18 @@ class TestUploadRepositoryImpl extends BaseRepository implements TestUploadRepos
   }) : super(networkInfo);
 
   @override
-  Future<ApiResult<TestItem>> createTest(TestItem test) async {
+  Future<ApiResult<TestItem>> createTest(TestItem test, {File? imageFile}) async {
     return handleRepositoryCall(() async {
-      final updatedTest = await remoteDataSource.uploadTest(test);
-      return ApiResult.success(updatedTest);
+      final createdTest = await remoteDataSource.uploadTest(test, imageFile: imageFile);
+      return ApiResult.success(createdTest);
     });
   }
 
   @override
-  Future<ApiResult<bool>> updateTest(String testId, TestItem updatedTest) async {
+  Future<ApiResult<TestItem>> updateTest(String testId, TestItem updatedTest, {File? imageFile}) async {
     return handleRepositoryCall(() async {
-      final success = await remoteDataSource.updateTest(testId, updatedTest);
-      if (!success) {
-        throw Exception('Failed to update test');
-      }
-      return ApiResult.success(true);
+      final updatedTestResult = await remoteDataSource.updateTest(testId, updatedTest, imageFile: imageFile);
+      return ApiResult.success(updatedTestResult);
     });
   }
 
@@ -44,21 +41,6 @@ class TestUploadRepositoryImpl extends BaseRepository implements TestUploadRepos
         throw Exception('Failed to delete test');
       }
       return ApiResult.success(true);
-    });
-  }
-
-  @override
-  Future<ApiResult<Map<String, dynamic>>> uploadTestImage(String testId, File imageFile) async {
-    return handleRepositoryCall(() async {
-      final uploadData = await remoteDataSource.uploadTestImage(testId, imageFile);
-      if (uploadData == null) {
-        throw Exception('Failed to upload test image');
-      }
-      
-      return ApiResult.success({
-        'url': uploadData.$1,
-        'storagePath': uploadData.$2,
-      });
     });
   }
 

@@ -115,6 +115,7 @@ class _BookEditPageState extends State<BookEditPage> {
         category: _categoryController.text,
       );
       
+      // Update book with optional new PDF and/or image atomically
       final success = await context.read<FileUploadCubit>().updateBook(
         widget.book.id,
         updatedBook,
@@ -126,7 +127,7 @@ class _BookEditPageState extends State<BookEditPage> {
         context.pop(true);
       }
     } catch (e) {
-      // ignore: use_build_context_synchronously //TODO: have a dedicated snackbar system
+      // ignore: use_build_context_synchronously
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error updating book: $e')),
       );

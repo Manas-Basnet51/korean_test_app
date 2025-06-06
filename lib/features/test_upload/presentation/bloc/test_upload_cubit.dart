@@ -25,6 +25,7 @@ class TestUploadCubit extends Cubit<TestUploadState> {
     required this.adminService,
   }) : super(const TestUploadInitial());
 
+  /// Create test with optional image - atomic operation
   Future<void> createTest(TestItem test, {File? imageFile}) async {
     if (state.currentOperation.isInProgress) {
       dev.log('Create test operation already in progress, skipping...');
@@ -45,37 +46,18 @@ class TestUploadCubit extends Cubit<TestUploadState> {
         ),
       ));
 
-      // Create test first to get ID
-      final createResult = await repository.createTest(test);
+      final result = await repository.createTest(test, imageFile: imageFile);
 
-      createResult.fold(
-        onSuccess: (createdTest) async {
-          var finalTest = createdTest;
-          
-          // Upload image if provided
-          if (imageFile != null) {
-            final imageResult = await repository.uploadTestImage(createdTest.id, imageFile);
-            
-            if (imageResult.isSuccess) {
-              final imageData = imageResult.data ?? {};
-              finalTest = createdTest.copyWith(
-                imageUrl: imageData['url'],
-                imagePath: imageData['storagePath'],
-              );
-              
-              // Update test with image URLs
-              await repository.updateTest(createdTest.id, finalTest);
-            }
-          }
-          
+      result.fold(
+        onSuccess: (createdTest) {
           _operationStopwatch.stop();
-          dev.log('Test created successfully in ${_operationStopwatch.elapsedMilliseconds}ms: ${finalTest.title} with ID: ${finalTest.id}');
+          dev.log('Test created successfully in ${_operationStopwatch.elapsedMilliseconds}ms: ${createdTest.title} with ID: ${createdTest.id}');
           
           emit(state.copyWith(
             isLoading: false,
             error: null,
             errorType: null,
-            createdTest: finalTest,
+            createdTest: createdTest,
             currentOperation: const TestUploadOperation(
               type: TestUploadOperationType.createTest,
               status: TestUploadOperationStatus.completed,
@@ -106,6 +88,7 @@ class TestUploadCubit extends Cubit<TestUploadState> {
     }
   }
 
+  /// Update test with optional new image - atomic operation
   Future<void> updateTest(String testId, TestItem updatedTest, {File? imageFile}) async {
     if (state.currentOperation.isInProgress) {
       dev.log('Update test operation already in progress, skipping...');
@@ -127,50 +110,24 @@ class TestUploadCubit extends Cubit<TestUploadState> {
         ),
       ));
 
-      var finalTest = updatedTest;
-      
-      // Upload new image if provided
-      if (imageFile != null) {
-        final imageResult = await repository.uploadTestImage(testId, imageFile);
-        
-        if (imageResult.isSuccess) {
-          final imageData = imageResult.data ?? {};
-          finalTest = updatedTest.copyWith(
-            imageUrl: imageData['url'],
-            imagePath: imageData['storagePath'],
-          );
-        }
-      }
-
-      final result = await repository.updateTest(testId, finalTest);
+      final result = await repository.updateTest(testId, updatedTest, imageFile: imageFile);
 
       result.fold(
-        onSuccess: (success) {
+        onSuccess: (updatedTestResult) {
           _operationStopwatch.stop();
+          dev.log('Test updated successfully in ${_operationStopwatch.elapsedMilliseconds}ms: ${updatedTestResult.title}');
           
-          if (success) {
-            dev.log('Test updated successfully in ${_operationStopwatch.elapsedMilliseconds}ms: ${finalTest.title}');
-            emit(state.copyWith(
-              isLoading: false,
-              error: null,
-              errorType: null,
-              currentOperation: TestUploadOperation(
-                type: TestUploadOperationType.updateTest,
-                status: TestUploadOperationStatus.completed,
-                testId: testId,
-              ),
-            ));
-          } else {
-            emit(state.copyWithBaseState(
-              error: 'Failed to update test',
-              isLoading: false,
-            ).copyWithOperation(TestUploadOperation(
+          emit(state.copyWith(
+            isLoading: false,
+            error: null,
+            errorType: null,
+            createdTest: updatedTestResult, // Store the updated test
+            currentOperation: TestUploadOperation(
               type: TestUploadOperationType.updateTest,
-              status: TestUploadOperationStatus.failed,
+              status: TestUploadOperationStatus.completed,
               testId: testId,
-              message: 'Failed to update test',
-            )));
-          }
+            ),
+          ));
           _clearOperationAfterDelay();
         },
         onFailure: (message, type) {
@@ -197,6 +154,7 @@ class TestUploadCubit extends Cubit<TestUploadState> {
     }
   }
 
+  /// Delete test and all associated files
   Future<void> deleteTest(String testId) async {
     if (state.currentOperation.isInProgress) {
       dev.log('Delete test operation already in progress, skipping...');

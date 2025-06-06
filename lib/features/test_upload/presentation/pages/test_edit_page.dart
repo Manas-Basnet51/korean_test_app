@@ -666,7 +666,7 @@ class _TestEditPageState extends State<TestEditPage> {
     if (image != null) {
       setState(() {
         _selectedImage = File(image.path);
-        _currentImageUrl = null; // Clear the current URL since we have a new image
+        _currentImageUrl = null;
       });
     }
   }
@@ -885,14 +885,11 @@ class _TestEditPageState extends State<TestEditPage> {
         icon: _selectedIcon,
         isPublished: _isPublished,
         updatedAt: DateTime.now(),
-        // Keep the current image URL if no new image was selected, otherwise it will be updated
         imageUrl: _selectedImage != null ? null : _currentImageUrl,
-        // Keep the current image path if no new image was selected
         imagePath: _selectedImage != null ? null : _originalTest!.imagePath,
       );
 
-      // Update test with image using TestUploadCubit
-      // Pass the selected image file if user picked a new one
+      // Update test with image atomically
       await _testUploadCubit.updateExistingTest(
         widget.testId, 
         updatedTest, 

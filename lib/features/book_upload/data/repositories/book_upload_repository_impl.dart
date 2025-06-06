@@ -19,58 +19,18 @@ class BookUploadRepositoryImpl extends BaseRepository implements BookUploadRepos
   }) : super(networkInfo);
 
   @override
-  Future<ApiResult<Map<String, dynamic>>> uploadPdfFile(String bookId, File pdfFile) async {
+  Future<ApiResult<BookItem>> createBook(BookItem book, File pdfFile, {File? coverImageFile}) async {
     return handleRepositoryCall(() async {
-      final result = await remoteDataSource.uploadPdfFile(bookId, pdfFile);
-      if (result == null) {
-        throw Exception('Failed to upload PDF file');
-      }
-      return ApiResult.success(result);
+      final createdBook = await remoteDataSource.uploadBook(book, pdfFile, coverImageFile: coverImageFile);
+      return ApiResult.success(createdBook);
     });
   }
 
   @override
-  Future<ApiResult<Map<String, dynamic>>> uploadCoverImage(String bookId, File imageFile) async {
+  Future<ApiResult<BookItem>> updateBook(String bookId, BookItem updatedBook, {File? pdfFile, File? coverImageFile}) async {
     return handleRepositoryCall(() async {
-      final result = await remoteDataSource.uploadCoverImage(bookId, imageFile);
-      if (result == null) {
-        throw Exception('Failed to upload cover image');
-      }
-      return ApiResult.success(result);
-    });
-  }
-
-  @override
-  Future<ApiResult<BookItem>> createBook(BookItem book) async {
-    return handleRepositoryCall(() async {
-      final success = await remoteDataSource.uploadBook(book);
-      if (!success) {
-        throw Exception('Failed to create book');
-      }
-      
-      final updatedBookList = await remoteDataSource.searchBookById(book.id);
-      if (updatedBookList.isEmpty) {
-        return ApiResult.success(book);
-      }
-      
-      return ApiResult.success(updatedBookList.first);
-    });
-  }
-
-  @override
-  Future<ApiResult<BookItem>> updateBook(String bookId, BookItem updatedBook) async {
-    return handleRepositoryCall(() async {
-      final success = await remoteDataSource.updateBook(bookId, updatedBook);
-      if (!success) {
-        throw Exception('Failed to update book');
-      }
-      
-      final updatedBookList = await remoteDataSource.searchBookById(bookId);
-      if (updatedBookList.isEmpty) {
-        return ApiResult.success(updatedBook);
-      }
-      
-      return ApiResult.success(updatedBookList.first);
+      final updatedBookResult = await remoteDataSource.updateBook(bookId, updatedBook, pdfFile: pdfFile, coverImageFile: coverImageFile);
+      return ApiResult.success(updatedBookResult);
     });
   }
 

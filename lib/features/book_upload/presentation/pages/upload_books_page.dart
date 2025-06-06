@@ -124,6 +124,7 @@ class _BookUploadPageState extends State<BookUploadPage> {
         updatedAt: DateTime.now(),
       );
       
+      // Upload book with PDF and image atomically
       final success = await _fileUploadCubit.uploadBook(
         book, 
         _selectedPdfFile!, 
@@ -139,13 +140,13 @@ class _BookUploadPageState extends State<BookUploadPage> {
         }
         
         _resetForm();
-        // ignore: use_build_context_synchronously //TODO: have a dedicated snackbar system
+        // ignore: use_build_context_synchronously
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Book uploaded successfully')),
         );
       }
     } catch (e) {
-      // ignore: use_build_context_synchronously //TODO: have a dedicated snackbar system
+      // ignore: use_build_context_synchronously
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error initiating upload: $e')),
       );

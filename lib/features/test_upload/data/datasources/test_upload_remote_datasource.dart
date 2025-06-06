@@ -2,10 +2,15 @@ import 'dart:io';
 import 'package:korean_language_app/features/tests/data/models/test_item.dart';
 
 abstract class TestUploadRemoteDataSource {
-  Future<TestItem> uploadTest(TestItem test);
-  Future<bool> updateTest(String testId, TestItem updatedTest);
+  /// Upload test with image atomically - test is only created if all uploads succeed
+  Future<TestItem> uploadTest(TestItem test, {File? imageFile});
+  
+  /// Update existing test with optional new image - returns updated test
+  Future<TestItem> updateTest(String testId, TestItem updatedTest, {File? imageFile});
+  
+  /// Delete test and all associated files
   Future<bool> deleteTest(String testId);
-  Future<(String, String)?> uploadTestImage(String testId, File imageFile);
+  
   Future<DateTime?> getTestLastUpdated(String testId);
   Future<String?> regenerateUrlFromPath(String storagePath);
   Future<bool> verifyUrlIsWorking(String url);
