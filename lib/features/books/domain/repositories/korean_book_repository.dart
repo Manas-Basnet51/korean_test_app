@@ -11,9 +11,6 @@ abstract class KoreanBookRepository {
   Future<ApiResult<List<BookItem>>> searchBooks(CourseCategory category, String query);
   Future<ApiResult<void>> clearCachedBooks();
   
-  Future<ApiResult<bool>> deleteBookWithFiles(String bookId);
-  Future<ApiResult<String?>> uploadBookCoverImage(String bookId, File imageFile);
-  Future<ApiResult<bool>> uploadBookWithPdf(BookItem book, File pdfFile);
   Future<ApiResult<File?>> getBookPdf(String bookId);
   Future<ApiResult<bool>> updateBookMetadata(BookItem book);
   Future<ApiResult<String?>> regenerateImageUrl(BookItem book);

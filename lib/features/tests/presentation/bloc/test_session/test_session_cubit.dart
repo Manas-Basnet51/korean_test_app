@@ -5,22 +5,22 @@ import 'package:korean_language_app/core/data/base_state.dart';
 import 'package:korean_language_app/core/errors/api_result.dart';
 import 'package:korean_language_app/core/services/auth_service.dart';
 import 'package:korean_language_app/features/auth/domain/entities/user.dart';
+import 'package:korean_language_app/features/test_results/domain/repositories/test_results_repository.dart';
 import 'package:korean_language_app/features/tests/data/models/test_answer.dart';
 import 'package:korean_language_app/features/tests/data/models/test_item.dart';
-import 'package:korean_language_app/features/tests/data/models/test_result.dart';
-import 'package:korean_language_app/features/tests/domain/repositories/tests_repository.dart';
+import 'package:korean_language_app/features/test_results/data/models/test_result.dart';
 
 part 'test_session_state.dart';
 
 class TestSessionCubit extends Cubit<TestSessionState> {
-  final TestsRepository repository;
+  final TestResultsRepository testResultsRepository;
   final AuthService authService;
   
   Timer? _testTimer;
   Timer? _questionTimer;
   
   TestSessionCubit({
-    required this.repository,
+    required this.testResultsRepository,
     required this.authService,
   }) : super(const TestSessionInitial());
 
@@ -231,8 +231,8 @@ class TestSessionCubit extends Cubit<TestSessionState> {
         completedAt: completedAt,
       );
 
-      // Save result
-      final saveResult = await repository.saveTestResult(result);
+      // Save result using test results repository
+      final saveResult = await testResultsRepository.saveTestResult(result);
       
       saveResult.fold(
         onSuccess: (_) {

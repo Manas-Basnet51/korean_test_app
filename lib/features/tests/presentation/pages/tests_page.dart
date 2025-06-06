@@ -9,6 +9,7 @@ import 'package:korean_language_app/core/presentation/language_preference/bloc/l
 import 'package:korean_language_app/core/presentation/snackbar/bloc/snackbar_cubit.dart';
 import 'package:korean_language_app/core/presentation/widgets/errors/error_widget.dart';
 import 'package:korean_language_app/core/routes/app_router.dart';
+import 'package:korean_language_app/features/test_upload/presentation/bloc/test_upload_cubit.dart';
 import 'package:korean_language_app/features/tests/data/models/test_item.dart';
 import 'package:korean_language_app/features/tests/presentation/bloc/tests_cubit.dart';
 import 'package:korean_language_app/features/tests/presentation/widgets/test_card.dart';
@@ -30,6 +31,7 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
   bool _isInitialized = false;
   
   TestsCubit get _testsCubit => context.read<TestsCubit>();
+  TestUploadCubit get _testUploadCubit => context.read<TestUploadCubit>();
   LanguagePreferenceCubit get _languageCubit => context.read<LanguagePreferenceCubit>();
   SnackBarCubit get _snackBarCubit => context.read<SnackBarCubit>();
   
@@ -784,7 +786,7 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
     ) ?? false;
 
     if (confirmed) {
-      final success = await _testsCubit.deleteExistingTest(test.id);
+      final success = await _testUploadCubit.deleteExistingTest(test.id);
       
       if (success) {
         _snackBarCubit.showSuccessLocalized(

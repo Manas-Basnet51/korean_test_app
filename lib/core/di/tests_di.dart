@@ -11,16 +11,16 @@ import 'package:korean_language_app/features/tests/presentation/bloc/tests_cubit
 void registerTestsDependencies(GetIt sl) {
   // Cubits
   sl.registerFactory(() => TestsCubit(repository: sl(), authService: sl(),adminService: sl()));
-  sl.registerFactory(() => TestSessionCubit(repository: sl(), authService: sl()));
+  sl.registerFactory(() => TestSessionCubit(testResultsRepository: sl(), authService: sl()));
   
   // Repository
   sl.registerLazySingleton<TestsRepository>(
-    () => TestsRepositoryImpl(remoteDataSource: sl(),networkInfo: sl(),localDataSource: sl(), adminService: sl()),
+    () => TestsRepositoryImpl(remoteDataSource: sl(),networkInfo: sl(),localDataSource: sl()),
   );
   
   // Data Source
   sl.registerLazySingleton<TestsRemoteDataSource>(
-    () => FirestoreTestsDataSourceImpl(firestore: sl(), storage: sl()),
+    () => FirestoreTestsDataSourceImpl(firestore: sl()),
   );
   sl.registerLazySingleton<TestsLocalDataSource>(
     () => TestsLocalDataSourceImpl(storageService: sl()),

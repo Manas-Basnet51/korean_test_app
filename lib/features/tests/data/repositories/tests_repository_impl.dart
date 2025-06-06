@@ -1,21 +1,17 @@
 import 'dart:developer' as dev;
-import 'dart:io';
 import 'package:korean_language_app/core/data/base_repository.dart';
 import 'package:korean_language_app/core/enums/test_category.dart';
 import 'package:korean_language_app/core/errors/api_result.dart';
 import 'package:korean_language_app/core/network/network_info.dart';
 import 'package:korean_language_app/core/utils/exception_mapper.dart';
-import 'package:korean_language_app/features/admin/data/service/admin_permission.dart';
 import 'package:korean_language_app/features/tests/data/datasources/tests_local_datasource.dart';
 import 'package:korean_language_app/features/tests/data/datasources/tests_remote_datasource.dart';
 import 'package:korean_language_app/features/tests/data/models/test_item.dart';
-import 'package:korean_language_app/features/tests/data/models/test_result.dart';
 import 'package:korean_language_app/features/tests/domain/repositories/tests_repository.dart';
 
 class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   final TestsRemoteDataSource remoteDataSource;
   final TestsLocalDataSource localDataSource;
-  final AdminPermissionService adminService;
   
   static const Duration cacheValidityDuration = Duration(hours: 2);
   static const int maxRetries = 3;
@@ -24,7 +20,6 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   TestsRepositoryImpl({
     required this.remoteDataSource,
     required this.localDataSource,
-    required this.adminService,
     required NetworkInfo networkInfo,
   }) : super(networkInfo);
 
@@ -222,240 +217,6 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
     }
   }
 
-  @override
-  Future<ApiResult<TestItem>> createTest(TestItem test) async {
-    if (!await networkInfo.isConnected) {
-      return ApiResult.failure('No internet connection', FailureType.network);
-    }
-
-    return _executeWithRetry(() async {
-      final updatedTest = await remoteDataSource.uploadTest(test);
-      
-      try {
-        await localDataSource.addTest(updatedTest);
-        await _updateTestHash(updatedTest);
-        await _updateLastSyncTime();
-      } catch (e) {
-        dev.log('Failed to cache after create: $e');
-      }
-      
-      return updatedTest;
-    });
-  }
-
-  @override
-  Future<ApiResult<bool>> updateTest(String testId, TestItem updatedTest) async {
-    if (!await networkInfo.isConnected) {
-      return ApiResult.failure('No internet connection', FailureType.network);
-    }
-
-    return _executeWithRetry(() async {
-      final success = await remoteDataSource.updateTest(testId, updatedTest);
-      
-      if (success) {
-        try {
-          await localDataSource.updateTest(updatedTest);
-          await _updateTestHash(updatedTest);
-        } catch (e) {
-          dev.log('Failed to update local cache: $e');
-        }
-      }
-      
-      return success;
-    });
-  }
-
-  @override
-  Future<ApiResult<bool>> deleteTest(String testId) async {
-    if (!await networkInfo.isConnected) {
-      return ApiResult.failure('No internet connection', FailureType.network);
-    }
-
-    return _executeWithRetry(() async {
-      final success = await remoteDataSource.deleteTest(testId);
-      
-      if (success) {
-        try {
-          await localDataSource.removeTest(testId);
-          await _removeTestHash(testId);
-        } catch (e) {
-          dev.log('Failed to remove from cache: $e');
-        }
-      }
-      
-      return success;
-    });
-  }
-
-  @override
-  Future<ApiResult<String?>> uploadTestImage(String testId, File imageFile) async {
-    if (!await networkInfo.isConnected) {
-      return ApiResult.failure('No internet connection', FailureType.network);
-    }
-
-    return _executeWithRetry(() async {
-      final uploadData = await remoteDataSource.uploadTestImage(testId, imageFile);
-      if (uploadData == null) return null;
-      
-      final imageUrl = uploadData.$1;
-      final imagePath = uploadData.$2;
-      
-      try {
-        await _updateTestImageInCache(testId, imageUrl, imagePath);
-      } catch (e) {
-        dev.log('Failed to update cache with new image: $e');
-      }
-      
-      return imageUrl;
-    });
-  }
-
-  @override
-  Future<ApiResult<String?>> regenerateImageUrl(TestItem test) async {
-    if (test.imagePath == null || test.imagePath!.isEmpty) {
-      return ApiResult.success(null);
-    }
-
-    if (!await networkInfo.isConnected) {
-      return ApiResult.failure('No internet connection', FailureType.network);
-    }
-
-    return _executeWithRetry(() async {
-      final newUrl = await remoteDataSource.regenerateUrlFromPath(test.imagePath!);
-      
-      if (newUrl != null && newUrl.isNotEmpty) {
-        final updatedTest = test.copyWith(imageUrl: newUrl);
-        
-        try {
-          await localDataSource.updateTest(updatedTest);
-          await remoteDataSource.updateTest(test.id, updatedTest);
-          await _updateTestHash(updatedTest);
-        } catch (e) {
-          dev.log('Failed to update test with new image URL: $e');
-        }
-      }
-      
-      return newUrl;
-    });
-  }
-
-  @override
-  Future<ApiResult<bool>> hasEditPermission(String testId, String userId) async {
-    try {
-      if (await adminService.isUserAdmin(userId)) {
-        return ApiResult.success(true);
-      }
-      
-      final test = await remoteDataSource.getTestById(testId);
-      if (test != null && test.creatorUid == userId) {
-        return ApiResult.success(true);
-      }
-      
-      return ApiResult.success(false);
-    } catch (e) {
-      return ApiResult.failure('Error checking edit permission: $e');
-    }
-  }
-
-  @override
-  Future<ApiResult<bool>> hasDeletePermission(String testId, String userId) async {
-    return hasEditPermission(testId, userId);
-  }
-
-  @override
-  Future<ApiResult<bool>> saveTestResult(TestResult result) async {
-    try {
-      await localDataSource.saveTestResult(result);
-      
-      if (!await networkInfo.isConnected) {
-        return ApiResult.success(true);
-      }
-
-      return _executeWithRetry(() async {
-        return await remoteDataSource.saveTestResult(result);
-      });
-    } catch (e) {
-      return ExceptionMapper.mapExceptionToApiResult(e as Exception);
-    }
-  }
-
-  @override
-  Future<ApiResult<List<TestResult>>> getUserTestResults(String userId, {int limit = 20}) async {
-    try {
-      final cachedResults = await localDataSource.getUserResults(userId);
-      
-      if (!await networkInfo.isConnected) {
-        return ApiResult.success(cachedResults);
-      }
-
-      return await _executeWithRetry(() async {
-        final remoteResults = await remoteDataSource.getUserTestResults(userId, limit: limit);
-        
-        if (remoteResults.isNotEmpty) {
-          await localDataSource.saveUserResults(userId, remoteResults);
-        }
-        
-        return remoteResults.isNotEmpty ? remoteResults : cachedResults;
-      });
-    } catch (e) {
-      try {
-        final cachedResults = await localDataSource.getUserResults(userId);
-        return ApiResult.success(cachedResults);
-      } catch (cacheError) {
-        return ExceptionMapper.mapExceptionToApiResult(e as Exception);
-      }
-    }
-  }
-
-  @override
-  Future<ApiResult<List<TestResult>>> getTestResults(String testId, {int limit = 50}) async {
-    if (!await networkInfo.isConnected) {
-      return ApiResult.failure('No internet connection', FailureType.network);
-    }
-
-    return _executeWithRetry(() async {
-      return await remoteDataSource.getTestResults(testId, limit: limit);
-    });
-  }
-
-  @override
-  Future<ApiResult<TestResult?>> getUserLatestResult(String userId, String testId) async {
-    try {
-      final cachedResult = await localDataSource.getLatestResult(userId, testId);
-      
-      if (!await networkInfo.isConnected) {
-        return ApiResult.success(cachedResult);
-      }
-
-      return await _executeWithRetry(() async {
-        final remoteResult = await remoteDataSource.getUserLatestResult(userId, testId);
-        
-        if (remoteResult != null) {
-          await localDataSource.saveTestResult(remoteResult);
-        }
-        
-        return remoteResult ?? cachedResult;
-      });
-    } catch (e) {
-      try {
-        final cachedResult = await localDataSource.getLatestResult(userId, testId);
-        return ApiResult.success(cachedResult);
-      } catch (cacheError) {
-        return ExceptionMapper.mapExceptionToApiResult(e as Exception);
-      }
-    }
-  }
-
-  @override
-  Future<ApiResult<List<TestResult>>> getCachedUserResults(String userId) async {
-    try {
-      final results = await localDataSource.getUserResults(userId);
-      return ApiResult.success(results);
-    } catch (e) {
-      return ApiResult.failure('Failed to get cached results: $e', FailureType.cache);
-    }
-  }
-
   // Private caching methods
   Future<bool> _isCacheValid() async {
     try {
@@ -533,12 +294,6 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   Future<void> _updateTestHash(TestItem test) async {
     final currentHashes = await localDataSource.getTestHashes();
     currentHashes[test.id] = _generateTestHash(test);
-    await localDataSource.setTestHashes(currentHashes);
-  }
-
-  Future<void> _removeTestHash(String testId) async {
-    final currentHashes = await localDataSource.getTestHashes();
-    currentHashes.remove(testId);
     await localDataSource.setTestHashes(currentHashes);
   }
 
@@ -624,24 +379,6 @@ class TestsRepositoryImpl extends BaseRepository implements TestsRepository {
   String _generateTestHash(TestItem test) {
     final content = '${test.title}_${test.description}_${test.questions.length}_${test.updatedAt?.millisecondsSinceEpoch ?? 0}';
     return content.hashCode.toString();
-  }
-
-  Future<void> _updateTestImageInCache(String testId, String imageUrl, String imagePath) async {
-    try {
-      final tests = await localDataSource.getAllTests();
-      final test = tests.firstWhere((t) => t.id == testId);
-      
-      final updatedTest = test.copyWith(
-        imageUrl: imageUrl,
-        imagePath: imagePath,
-      );
-      
-      await localDataSource.updateTest(updatedTest);
-      await remoteDataSource.updateTest(testId, updatedTest);
-      await _updateTestHash(updatedTest);
-    } catch (e) {
-      dev.log('Error updating test image in cache: $e');
-    }
   }
 
   Future<ApiResult<T>> _executeWithRetry<T>(Future<T> Function() operation) async {

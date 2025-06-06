@@ -16,12 +16,12 @@ import 'package:korean_language_app/features/book_upload/presentation/pages/uplo
 import 'package:korean_language_app/features/home/presentation/pages/home_page.dart';
 import 'package:korean_language_app/features/profile/presentation/pages/language_preference_page.dart';
 import 'package:korean_language_app/features/profile/presentation/pages/profile_page.dart';
-import 'package:korean_language_app/features/tests/data/models/test_result.dart';
-import 'package:korean_language_app/features/tests/presentation/pages/test_edit_page.dart';
-import 'package:korean_language_app/features/tests/presentation/pages/test_result_page.dart';
-import 'package:korean_language_app/features/tests/presentation/pages/test_results_history_page.dart';
+import 'package:korean_language_app/features/test_results/data/models/test_result.dart';
+import 'package:korean_language_app/features/test_upload/presentation/pages/test_edit_page.dart';
+import 'package:korean_language_app/features/test_results/presentation/pages/test_result_page.dart';
+import 'package:korean_language_app/features/test_results/presentation/pages/test_results_history_page.dart';
 import 'package:korean_language_app/features/tests/presentation/pages/test_taking_page.dart';
-import 'package:korean_language_app/features/tests/presentation/pages/test_upload_page.dart';
+import 'package:korean_language_app/features/test_upload/presentation/pages/test_upload_page.dart';
 import 'package:korean_language_app/features/tests/presentation/pages/tests_page.dart';
 import 'package:korean_language_app/features/user_management/presentation/pages/user_management_page.dart';
 import 'package:korean_language_app/core/presentation/widgets/splash/splash_screen.dart';

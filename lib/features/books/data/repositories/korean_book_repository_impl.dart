@@ -201,87 +201,6 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
     });
   }
 
-  @override
-  Future<ApiResult<bool>> deleteBookWithFiles(String bookId) async {
-    if (!await networkInfo.isConnected) {
-      return ApiResult.failure('No internet connection', FailureType.network);
-    }
-
-    return _executeWithRetry(() async {
-      final success = await remoteDataSource.deleteBook(bookId);
-      
-      if (success) {
-        try {
-          await localDataSource.removeBook(bookId);
-          await localDataSource.deletePdfFile(bookId);
-          await _removeBookHash(bookId);
-        } catch (e) {
-          dev.log('Failed to remove from cache: $e');
-        }
-      }
-      
-      return success;
-    });
-  }
-
-  @override
-  Future<ApiResult<bool>> uploadBookWithPdf(BookItem book, File pdfFile) async {
-    if (!await networkInfo.isConnected) {
-      return ApiResult.failure('No internet connection', FailureType.network);
-    }
-
-    if (book.id.isEmpty) {
-      return ApiResult.failure('Book ID cannot be empty', FailureType.validation);
-    }
-
-    return _executeWithRetry(() async {
-      // Upload PDF first
-      final pdfUploadData = await remoteDataSource.uploadPdfFile(book.id, pdfFile);
-      
-      // Update book with PDF info and upload
-      final updatedBook = book.copyWith(
-        pdfUrl: pdfUploadData.$1,
-        pdfPath: pdfUploadData.$2,
-      );
-
-      final success = await remoteDataSource.uploadBook(updatedBook);
-      
-      if (success) {
-        try {
-          await localDataSource.addBook(updatedBook);
-          await localDataSource.savePdfFile(book.id, pdfFile);
-          await _updateBookHash(updatedBook);
-          await _updateLastSyncTime();
-        } catch (e) {
-          dev.log('Failed to cache after upload: $e');
-        }
-      }
-      
-      return success;
-    });
-  }
-
-  @override
-  Future<ApiResult<String?>> uploadBookCoverImage(String bookId, File imageFile) async {
-    if (!await networkInfo.isConnected) {
-      return ApiResult.failure('No internet connection', FailureType.network);
-    }
-
-    return _executeWithRetry(() async {
-      final uploadData = await remoteDataSource.uploadCoverImage(bookId, imageFile);
-      final imageUrl = uploadData.$1;
-      final imagePath = uploadData.$2;
-      
-      // Update book in cache with new image URL
-      try {
-        await _updateBookImageInCache(bookId, imageUrl, imagePath);
-      } catch (e) {
-        dev.log('Failed to update cache with new image: $e');
-      }
-      
-      return imageUrl;
-    });
-  }
 
   @override
   Future<ApiResult<String?>> regenerateImageUrl(BookItem book) async {
@@ -392,12 +311,6 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
   Future<void> _updateBookHash(BookItem book) async {
     final currentHashes = await localDataSource.getBookHashes();
     currentHashes[book.id] = _generateBookHash(book);
-    await localDataSource.setBookHashes(currentHashes);
-  }
-
-  Future<void> _removeBookHash(String bookId) async {
-    final currentHashes = await localDataSource.getBookHashes();
-    currentHashes.remove(bookId);
     await localDataSource.setBookHashes(currentHashes);
   }
 
@@ -549,24 +462,6 @@ class KoreanBookRepositoryImpl extends BaseRepository implements KoreanBookRepos
       
     } catch (e) {
       return false;
-    }
-  }
-
-  Future<void> _updateBookImageInCache(String bookId, String imageUrl, String imagePath) async {
-    try {
-      final books = await localDataSource.getAllBooks();
-      final book = books.firstWhere((b) => b.id == bookId);
-      
-      final updatedBook = book.copyWith(
-        bookImage: imageUrl,
-        bookImagePath: imagePath,
-      );
-      
-      await localDataSource.updateBook(updatedBook);
-      await remoteDataSource.updateBook(bookId, updatedBook);
-      await _updateBookHash(updatedBook);
-    } catch (e) {
-      dev.log('Error updating book image in cache: $e');
     }
   }
 
