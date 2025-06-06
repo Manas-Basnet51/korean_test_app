@@ -7,7 +7,7 @@ abstract class TestUploadRepository {
   Future<ApiResult<TestItem>> createTest(TestItem test);
   Future<ApiResult<bool>> updateTest(String testId, TestItem updatedTest);
   Future<ApiResult<bool>> deleteTest(String testId);
-  Future<ApiResult<String?>> uploadTestImage(String testId, File imageFile);
+  Future<ApiResult<Map<String, dynamic>>> uploadTestImage(String testId, File imageFile);
   Future<ApiResult<String?>> regenerateImageUrl(TestItem test);
   
   // Permission checks

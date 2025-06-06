@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:developer' as dev;
+import 'dart:io';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:korean_language_app/core/data/base_state.dart';
 import 'package:korean_language_app/core/errors/api_result.dart';
@@ -24,7 +25,7 @@ class TestUploadCubit extends Cubit<TestUploadState> {
     required this.adminService,
   }) : super(const TestUploadInitial());
 
-  Future<void> createTest(TestItem test) async {
+  Future<void> createTest(TestItem test, {File? imageFile}) async {
     if (state.currentOperation.isInProgress) {
       dev.log('Create test operation already in progress, skipping...');
       return;
@@ -44,18 +45,37 @@ class TestUploadCubit extends Cubit<TestUploadState> {
         ),
       ));
 
-      final result = await repository.createTest(test);
+      // Create test first to get ID
+      final createResult = await repository.createTest(test);
 
-      result.fold(
-        onSuccess: (updatedTest) {
+      createResult.fold(
+        onSuccess: (createdTest) async {
+          var finalTest = createdTest;
+          
+          // Upload image if provided
+          if (imageFile != null) {
+            final imageResult = await repository.uploadTestImage(createdTest.id, imageFile);
+            
+            if (imageResult.isSuccess) {
+              final imageData = imageResult.data ?? {};
+              finalTest = createdTest.copyWith(
+                imageUrl: imageData['url'],
+                imagePath: imageData['storagePath'],
+              );
+              
+              // Update test with image URLs
+              await repository.updateTest(createdTest.id, finalTest);
+            }
+          }
+          
           _operationStopwatch.stop();
-          dev.log('Test created successfully in ${_operationStopwatch.elapsedMilliseconds}ms: ${updatedTest.title} with ID: ${updatedTest.id}');
+          dev.log('Test created successfully in ${_operationStopwatch.elapsedMilliseconds}ms: ${finalTest.title} with ID: ${finalTest.id}');
           
           emit(state.copyWith(
             isLoading: false,
             error: null,
             errorType: null,
-            createdTest: updatedTest,
+            createdTest: finalTest,
             currentOperation: const TestUploadOperation(
               type: TestUploadOperationType.createTest,
               status: TestUploadOperationStatus.completed,
@@ -86,7 +106,7 @@ class TestUploadCubit extends Cubit<TestUploadState> {
     }
   }
 
-  Future<void> updateTest(String testId, TestItem updatedTest) async {
+  Future<void> updateTest(String testId, TestItem updatedTest, {File? imageFile}) async {
     if (state.currentOperation.isInProgress) {
       dev.log('Update test operation already in progress, skipping...');
       return;
@@ -107,14 +127,29 @@ class TestUploadCubit extends Cubit<TestUploadState> {
         ),
       ));
 
-      final result = await repository.updateTest(testId, updatedTest);
+      var finalTest = updatedTest;
+      
+      // Upload new image if provided
+      if (imageFile != null) {
+        final imageResult = await repository.uploadTestImage(testId, imageFile);
+        
+        if (imageResult.isSuccess) {
+          final imageData = imageResult.data ?? {};
+          finalTest = updatedTest.copyWith(
+            imageUrl: imageData['url'],
+            imagePath: imageData['storagePath'],
+          );
+        }
+      }
+
+      final result = await repository.updateTest(testId, finalTest);
 
       result.fold(
         onSuccess: (success) {
           _operationStopwatch.stop();
           
           if (success) {
-            dev.log('Test updated successfully in ${_operationStopwatch.elapsedMilliseconds}ms: ${updatedTest.title}');
+            dev.log('Test updated successfully in ${_operationStopwatch.elapsedMilliseconds}ms: ${finalTest.title}');
             emit(state.copyWith(
               isLoading: false,
               error: null,
@@ -239,9 +274,9 @@ class TestUploadCubit extends Cubit<TestUploadState> {
   }
 
   // High-level helper methods for UI
-  Future<bool> uploadNewTest(TestItem test) async {
+  Future<bool> uploadNewTest(TestItem test, {File? imageFile}) async {
     try {
-      await createTest(test);
+      await createTest(test, imageFile: imageFile);
       
       final currentState = state.currentOperation;
       if (currentState.status == TestUploadOperationStatus.completed && 
@@ -256,9 +291,9 @@ class TestUploadCubit extends Cubit<TestUploadState> {
     }
   }
 
-  Future<bool> updateExistingTest(String testId, TestItem updatedTest) async {
+  Future<bool> updateExistingTest(String testId, TestItem updatedTest, {File? imageFile}) async {
     try {
-      await updateTest(testId, updatedTest);
+      await updateTest(testId, updatedTest, imageFile: imageFile);
       
       final currentState = state.currentOperation;
       if (currentState.status == TestUploadOperationStatus.completed && 

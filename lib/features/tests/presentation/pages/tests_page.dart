@@ -133,6 +133,7 @@ class _TestsPageState extends State<TestsPage> with SingleTickerProviderStateMix
     return currentScroll >= (maxScroll * 0.9);
   }
   
+
   Future<void> _refreshData() async {
     setState(() => _isRefreshing = true);
     

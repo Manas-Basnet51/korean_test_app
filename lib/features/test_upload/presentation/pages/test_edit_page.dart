@@ -885,12 +885,19 @@ class _TestEditPageState extends State<TestEditPage> {
         icon: _selectedIcon,
         isPublished: _isPublished,
         updatedAt: DateTime.now(),
-        // Keep the image URL if no new image was selected
+        // Keep the current image URL if no new image was selected, otherwise it will be updated
         imageUrl: _selectedImage != null ? null : _currentImageUrl,
+        // Keep the current image path if no new image was selected
+        imagePath: _selectedImage != null ? null : _originalTest!.imagePath,
       );
 
-      // Update test using TestUploadCubit
-      await _testUploadCubit.updateExistingTest(widget.testId, updatedTest);
+      // Update test with image using TestUploadCubit
+      // Pass the selected image file if user picked a new one
+      await _testUploadCubit.updateExistingTest(
+        widget.testId, 
+        updatedTest, 
+        imageFile: _selectedImage,
+      );
 
     } catch (e) {
       _snackBarCubit.showErrorLocalized(

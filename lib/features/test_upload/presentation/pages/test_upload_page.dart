@@ -782,10 +782,13 @@ class _TestUploadPageState extends State<TestUploadPage> {
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
         isPublished: _isPublished,
+        // Initialize image fields as null - they will be set after upload
+        imageUrl: null,
+        imagePath: null,
       );
 
-      // Upload test using TestUploadCubit
-      await _testUploadCubit.uploadNewTest(test);
+      // Upload test with image using TestUploadCubit
+      await _testUploadCubit.uploadNewTest(test, imageFile: _selectedImage);
 
     } catch (e) {
       _snackBarCubit.showErrorLocalized(
