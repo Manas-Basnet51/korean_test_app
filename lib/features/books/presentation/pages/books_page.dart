@@ -14,7 +14,7 @@ import 'package:korean_language_app/features/books/presentation/bloc/favorite_bo
 import 'package:korean_language_app/features/books/presentation/bloc/korean_books/korean_books_cubit.dart';
 import 'package:korean_language_app/features/book_upload/presentation/bloc/file_upload_cubit.dart';
 import 'package:korean_language_app/features/books/data/models/book_item.dart';
-import 'package:korean_language_app/features/books/presentation/pages/book_edit_page.dart';
+import 'package:korean_language_app/features/book_upload/presentation/pages/book_edit_page.dart';
 import 'package:korean_language_app/features/books/presentation/pages/book_search_page.dart';
 import 'package:korean_language_app/features/books/presentation/pages/pdf_viewer_page.dart';
 import 'package:korean_language_app/features/books/presentation/widgets/book_detail_bottomsheet.dart';

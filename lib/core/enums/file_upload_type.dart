@@ -1,0 +1,1 @@
+enum FileUploadType { pdf, image, media }

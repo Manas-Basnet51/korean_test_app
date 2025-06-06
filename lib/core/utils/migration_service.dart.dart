@@ -117,7 +117,7 @@ class TestResultsMigrationService {
         ));
         
         // Small delay for UI responsiveness
-        await Future.delayed(Duration(milliseconds: 50));
+        await Future.delayed(const Duration(milliseconds: 50));
         
       } while (true);
       
@@ -258,7 +258,7 @@ class TestResultsMigrationService {
         ));
         
         // Small delay
-        await Future.delayed(Duration(milliseconds: 50));
+        await Future.delayed(const Duration(milliseconds: 50));
         
       } while (true);
       

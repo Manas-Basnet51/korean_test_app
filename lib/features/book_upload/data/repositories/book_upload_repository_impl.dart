@@ -1,141 +1,127 @@
 import 'dart:io';
 
-import 'package:dartz/dartz.dart';
-import 'package:korean_language_app/core/errors/failures.dart';
+import 'package:korean_language_app/core/data/base_repository.dart';
+import 'package:korean_language_app/core/errors/api_result.dart';
 import 'package:korean_language_app/core/network/network_info.dart';
 import 'package:korean_language_app/features/admin/data/service/admin_permission.dart';
 import 'package:korean_language_app/features/book_upload/data/datasources/book_upload_remote_datasource.dart';
 import 'package:korean_language_app/features/book_upload/domain/repositories/book_upload_repository.dart';
 import 'package:korean_language_app/features/books/data/models/book_item.dart';
 
-class BookUploadRepositoryImpl implements BookUploadRepository {
+class BookUploadRepositoryImpl extends BaseRepository implements BookUploadRepository {
   final BookUploadRemoteDataSource remoteDataSource;
-  final NetworkInfo networkInfo;
   final AdminPermissionService adminService;
 
   BookUploadRepositoryImpl({
     required this.remoteDataSource,
-    required this.networkInfo,
+    required NetworkInfo networkInfo,
     required this.adminService,
-  });
+  }) : super(networkInfo);
 
   @override
-  Future<Either<Failure, Map<String, dynamic>>> uploadPdfFile(String bookId, File pdfFile) async {
-    if (!await networkInfo.isConnected) {
-      return const Left(NetworkFailure('No internet connection'));
-    }
-
-    try {
-      final result = await remoteDataSource.uploadPdfFile(bookId, pdfFile);
-      if (result == null) {
-        return const Left(ServerFailure('Failed to upload PDF file'));
+  Future<ApiResult<Map<String, dynamic>>> uploadPdfFile(String bookId, File pdfFile) async {
+    return handleRepositoryCall(() async {
+      try {
+        final result = await remoteDataSource.uploadPdfFile(bookId, pdfFile);
+        if (result == null) {
+          return ApiResult.failure('Failed to upload PDF file', FailureType.server);
+        }
+        return ApiResult.success(result);
+      } catch (e) {
+        return ApiResult.failure('Error uploading PDF: $e', FailureType.server);
       }
-      return Right(result);
-    } catch (e) {
-      return Left(ServerFailure('Error uploading PDF: $e'));
-    }
+    });
   }
 
   @override
-  Future<Either<Failure, Map<String, dynamic>>> uploadCoverImage(String bookId, File imageFile) async {
-    if (!await networkInfo.isConnected) {
-      return const Left(NetworkFailure('No internet connection'));
-    }
-
-    try {
-      final result = await remoteDataSource.uploadCoverImage(bookId, imageFile);
-      if (result == null) {
-        return const Left(ServerFailure('Failed to upload cover image'));
+  Future<ApiResult<Map<String, dynamic>>> uploadCoverImage(String bookId, File imageFile) async {
+    return handleRepositoryCall(() async {
+      try {
+        final result = await remoteDataSource.uploadCoverImage(bookId, imageFile);
+        if (result == null) {
+          return ApiResult.failure('Failed to upload cover image', FailureType.server);
+        }
+        return ApiResult.success(result);
+      } catch (e) {
+        return ApiResult.failure('Error uploading image: $e', FailureType.server);
       }
-      return Right(result);
-    } catch (e) {
-      return Left(ServerFailure('Error uploading image: $e'));
-    }
+    });
   }
 
   @override
-  Future<Either<Failure, BookItem>> createBook(BookItem book) async {
-    if (!await networkInfo.isConnected) {
-      return const Left(NetworkFailure('No internet connection'));
-    }
-
-    try {
-      final success = await remoteDataSource.uploadBook(book);
-      if (!success) {
-        return const Left(ServerFailure('Failed to create book'));
+  Future<ApiResult<BookItem>> createBook(BookItem book) async {
+    return handleRepositoryCall(() async {
+      try {
+        final success = await remoteDataSource.uploadBook(book);
+        if (!success) {
+          return ApiResult.failure('Failed to create book', FailureType.server);
+        }
+        
+        final updatedBookList = await remoteDataSource.searchBookById(book.id);
+        if (updatedBookList.isEmpty) {
+          return ApiResult.success(book);
+        }
+        
+        return ApiResult.success(updatedBookList.first);
+      } catch (e) {
+        return ApiResult.failure('Error creating book: $e', FailureType.server);
       }
-      
-      final updatedBookList = await remoteDataSource.searchBookById(book.id);
-      if (updatedBookList.isEmpty) {
-        return Right(book);
-      }
-      
-      return Right(updatedBookList.first);
-    } catch (e) {
-      return Left(ServerFailure('Error creating book: $e'));
-    }
+    });
   }
 
   @override
-  Future<Either<Failure, BookItem>> updateBook(String bookId, BookItem updatedBook) async {
-    if (!await networkInfo.isConnected) {
-      return const Left(NetworkFailure('No internet connection'));
-    }
-
-    try {
-      final success = await remoteDataSource.updateBook(bookId, updatedBook);
-      if (!success) {
-        return const Left(ServerFailure('Failed to update book'));
+  Future<ApiResult<BookItem>> updateBook(String bookId, BookItem updatedBook) async {
+    return handleRepositoryCall(() async {
+      try {
+        final success = await remoteDataSource.updateBook(bookId, updatedBook);
+        if (!success) {
+          return ApiResult.failure('Failed to update book', FailureType.server);
+        }
+        
+        final updatedBookList = await remoteDataSource.searchBookById(bookId);
+        if (updatedBookList.isEmpty) {
+          return ApiResult.success(updatedBook);
+        }
+        
+        return ApiResult.success(updatedBookList.first);
+      } catch (e) {
+        return ApiResult.failure('Error updating book: $e', FailureType.server);
       }
-      
-      final updatedBookList = await remoteDataSource.searchBookById(bookId);
-      if (updatedBookList.isEmpty) {
-        return Right(updatedBook);
-      }
-      
-      return Right(updatedBookList.first);
-    } catch (e) {
-      return Left(ServerFailure('Error updating book: $e'));
-    }
+    });
   }
 
   @override
-  Future<Either<Failure, bool>> deleteBook(String bookId) async {
-    if (!await networkInfo.isConnected) {
-      return const Left(NetworkFailure('No internet connection'));
-    }
-
-    try {
-      final success = await remoteDataSource.deleteBook(bookId);
-      return Right(success);
-    } catch (e) {
-      return Left(ServerFailure('Error deleting book: $e'));
-    }
+  Future<ApiResult<bool>> deleteBook(String bookId) async {
+    return handleRepositoryCall(() async {
+      try {
+        final success = await remoteDataSource.deleteBook(bookId);
+        return ApiResult.success(success);
+      } catch (e) {
+        return ApiResult.failure('Error deleting book: $e', FailureType.server);
+      }
+    });
   }
 
   @override
-  Future<Either<Failure, bool>> hasEditPermission(String bookId, String userId) async {
+  Future<ApiResult<bool>> hasEditPermission(String bookId, String userId) async {
     try {
-      // Check if user is admin
       if (await adminService.isUserAdmin(userId)) {
-        return const Right(true);
+        return ApiResult.success(true);
       }
       
-      // Check if user is creator
       final book = await remoteDataSource.getBookById(bookId);
       if (book != null && book.creatorUid == userId) {
-        return const Right(true);
+        return ApiResult.success(true);
       }
       
-      return const Right(false);
+      return ApiResult.success(false);
     } catch (e) {
-      return Left(ServerFailure('Error checking edit permission: $e'));
+      return ApiResult.failure('Error checking edit permission: $e', FailureType.server);
     }
   }
 
   @override
-  Future<Either<Failure, bool>> hasDeletePermission(String bookId, String userId) async {
-    // Typically the same permission check as edit
+  Future<ApiResult<bool>> hasDeletePermission(String bookId, String userId) async {
     return hasEditPermission(bookId, userId);
   }
 }

@@ -1,33 +1,40 @@
+import 'dart:io';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 import 'package:korean_language_app/core/enums/book_level.dart';
 import 'package:korean_language_app/core/enums/course_category.dart';
 import 'package:korean_language_app/core/enums/file_upload_type.dart';
-import 'package:korean_language_app/features/auth/presentation/bloc/auth_cubit.dart';
 import 'package:korean_language_app/features/books/presentation/bloc/korean_books/korean_books_cubit.dart';
 import 'package:korean_language_app/features/book_upload/presentation/bloc/file_upload_cubit.dart';
 import 'package:korean_language_app/features/books/data/models/book_item.dart';
-import 'dart:io';
-import 'package:flutter_bloc/flutter_bloc.dart';
 
-class BookUploadPage extends StatefulWidget {
-  const BookUploadPage({super.key});
+class BookEditPage extends StatefulWidget {
+  final BookItem book;
+  
+  const BookEditPage({
+    super.key,
+    required this.book,
+  });
 
   @override
-  State<BookUploadPage> createState() => _BookUploadPageState();
+  State<BookEditPage> createState() => _BookEditPageState();
 }
 
-class _BookUploadPageState extends State<BookUploadPage> {
+class _BookEditPageState extends State<BookEditPage> {
   final _formKey = GlobalKey<FormState>();
-  final _titleController = TextEditingController();
-  final _descriptionController = TextEditingController();
-  final _durationController = TextEditingController(text: '30 mins');
-  final _chaptersController = TextEditingController(text: '1');
-  final _countryController = TextEditingController(text: 'Korea');
-  final _categoryController = TextEditingController(text: 'Language');
+  late TextEditingController _titleController;
+  late TextEditingController _descriptionController;
+  late TextEditingController _durationController;
+  late TextEditingController _chaptersController;
+  late TextEditingController _countryController;
+  late TextEditingController _categoryController;
   
-  BookLevel _selectedLevel = BookLevel.beginner;
-  CourseCategory _selectedCategory = CourseCategory.korean;
-  IconData _selectedIcon = Icons.book;
+  late BookLevel _selectedLevel;
+  late CourseCategory _selectedCategory;
+  late IconData _selectedIcon;
   
   File? _selectedPdfFile;
   String? _pdfFileName;
@@ -36,16 +43,25 @@ class _BookUploadPageState extends State<BookUploadPage> {
   File? _selectedImageFile;
   String? _imageFileName;
   bool _imageSelected = false;
-
-  late KoreanBooksCubit _koreanBooksCubit;
-  late FileUploadCubit _fileUploadCubit;
   
   @override
   void initState() {
     super.initState();
-    _fileUploadCubit = context.read<FileUploadCubit>();
-    _koreanBooksCubit = context.read<KoreanBooksCubit>();
-    initialize();
+    _initializeControllers();
+    context.read<FileUploadCubit>().resetState();
+  }
+  
+  void _initializeControllers() {
+    _titleController = TextEditingController(text: widget.book.title);
+    _descriptionController = TextEditingController(text: widget.book.description);
+    _durationController = TextEditingController(text: widget.book.duration);
+    _chaptersController = TextEditingController(text: widget.book.chaptersCount.toString());
+    _countryController = TextEditingController(text: widget.book.country);
+    _categoryController = TextEditingController(text: widget.book.category);
+    
+    _selectedLevel = widget.book.level;
+    _selectedCategory = widget.book.courseCategory;
+    _selectedIcon = widget.book.icon;
   }
   
   @override
@@ -58,13 +74,9 @@ class _BookUploadPageState extends State<BookUploadPage> {
     _categoryController.dispose();
     super.dispose();
   }
-
-  initialize() {
-    _fileUploadCubit.resetState();
-  }
   
   Future<void> _pickPdfFile() async {
-    final file = await _fileUploadCubit.pickPdfFile();
+    final file = await context.read<FileUploadCubit>().pickPdfFile();
     if (file != null) {
       setState(() {
         _selectedPdfFile = file;
@@ -75,7 +87,7 @@ class _BookUploadPageState extends State<BookUploadPage> {
   }
   
   Future<void> _pickImageFile() async {
-    final file = await _fileUploadCubit.pickImageFile();
+    final file = await context.read<FileUploadCubit>().pickImageFile();
     if (file != null) {
       setState(() {
         _selectedImageFile = file;
@@ -85,92 +97,40 @@ class _BookUploadPageState extends State<BookUploadPage> {
     }
   }
   
-  Future<void> _uploadBook() async {
+  Future<void> _updateBook() async {
     if (_formKey.currentState?.validate() != true) {
       return;
     }
     
-    if (_selectedPdfFile == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a PDF file')),
-      );
-      return;
-    }
-    
     try {
-      // Get current user from AuthCubit
-      final authState = context.read<AuthCubit>().state;
-      String? creatorUid;
-      
-      if (authState is Authenticated) {
-        creatorUid = authState.user.uid;
-      }
-      
-      final book = BookItem(
-        id: '', // Will be generated by Firebase
+      final updatedBook = widget.book.copyWith(
         title: _titleController.text,
         description: _descriptionController.text,
-        bookImage: null, // Will be updated after upload
-        pdfUrl: null, // Will be updated after upload
         duration: _durationController.text,
-        chaptersCount: int.tryParse(_chaptersController.text) ?? 1,
+        chaptersCount: int.tryParse(_chaptersController.text) ?? widget.book.chaptersCount,
         icon: _selectedIcon,
         level: _selectedLevel,
         courseCategory: _selectedCategory,
         country: _countryController.text,
         category: _categoryController.text,
-        creatorUid: creatorUid, // Add creator UID
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
       );
       
-      final success = await _fileUploadCubit.uploadBook(
-        book, 
-        _selectedPdfFile!, 
-        _selectedImageFile
+      final success = await context.read<FileUploadCubit>().updateBook(
+        widget.book.id,
+        updatedBook,
+        pdfFile: _selectedPdfFile,
+        imageFile: _selectedImageFile,
       );
       
-      if (success) {
-        // Check if we got the uploaded book from the cubit
-        final uploadState = _fileUploadCubit.state;
-        if (uploadState is FileUploadSuccess && uploadState.book != null) {
-          // Add book to KoreanBooksCubit state
-          _koreanBooksCubit.addBookToState(uploadState.book!);
-        }
-        
-        _resetForm();
-        // ignore: use_build_context_synchronously //TODO: have a dedicated snackbar system
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Book uploaded successfully')),
-        );
+      if (success && mounted) {
+        context.pop(true);
       }
     } catch (e) {
       // ignore: use_build_context_synchronously //TODO: have a dedicated snackbar system
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error initiating upload: $e')),
+        SnackBar(content: Text('Error updating book: $e')),
       );
     }
-  }
-  
-  void _resetForm() {
-    _titleController.clear();
-    _descriptionController.clear();
-    _durationController.text = '30 mins';
-    _chaptersController.text = '1';
-    _countryController.text = 'Korea';
-    _categoryController.text = 'Language';
-    setState(() {
-      _selectedLevel = BookLevel.beginner;
-      _selectedCategory = CourseCategory.korean;
-      _selectedIcon = Icons.book;
-      _selectedPdfFile = null;
-      _pdfFileName = null;
-      _pdfSelected = false;
-      _selectedImageFile = null;
-      _imageFileName = null;
-      _imageSelected = false;
-    });
-    _fileUploadCubit.resetState();
   }
   
   @override
@@ -181,7 +141,7 @@ class _BookUploadPageState extends State<BookUploadPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          'Upload New Book',
+          'Edit Book',
           style: theme.textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.bold,
           ),
@@ -193,15 +153,12 @@ class _BookUploadPageState extends State<BookUploadPage> {
         listener: (context, state) {
           if (state is FileUploadSuccess) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Book uploaded successfully')),
+              const SnackBar(content: Text('Book updated successfully')),
             );
-            
-            // Add book to Korean books state if available
             if (state.book != null) {
-              _koreanBooksCubit.addBookToState(state.book!);
+              context.read<KoreanBooksCubit>().updateBookInState(state.book!);
             }
-            
-            _resetForm();
+            Navigator.of(context).pop(true);
           } else if (state is FileUploadError) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Error: ${state.message}')),
@@ -209,8 +166,13 @@ class _BookUploadPageState extends State<BookUploadPage> {
           }
         },
         builder: (context, state) {
-          bool isUploading = state is FileUploading;
-          double uploadProgress = isUploading ? (state).progress : 0.0;
+          bool isUploading = false;
+          double uploadProgress = 0.0;
+          
+          if (state is FileUploading) {
+            isUploading = true;
+            uploadProgress = state.progress;
+          }
           
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
@@ -389,17 +351,14 @@ class _BookUploadPageState extends State<BookUploadPage> {
                             prefixIcon: Icon(Icons.school),
                           ),
                           items: CourseCategory.values.map((category) {
-                            // Skip favorite as it's not a valid upload category
                             if (category == CourseCategory.favorite) {
-                              return null;
+                              return null; // Skip favorite
                             }
                             return DropdownMenuItem<CourseCategory>(
                               value: category,
                               child: Text(category.toString().split('.').last),
                             );
-                          }).where((item) => item != null)
-                            .cast<DropdownMenuItem<CourseCategory>>()
-                            .toList(),
+                          }).where((item) => item != null).cast<DropdownMenuItem<CourseCategory>>().toList(),
                           onChanged: isUploading 
                               ? null 
                               : (CourseCategory? newValue) {
@@ -416,7 +375,7 @@ class _BookUploadPageState extends State<BookUploadPage> {
                   const SizedBox(height: 24),
                   
                   Text(
-                    'Book PDF File (Required)',
+                    'Update PDF File (Optional)',
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -449,7 +408,8 @@ class _BookUploadPageState extends State<BookUploadPage> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    _pdfFileName ?? 'No PDF selected',
+                                    _pdfFileName ?? 
+                                    (widget.book.pdfUrl != null ? 'Current PDF: ${widget.book.id}.pdf' : 'No PDF selected'),
                                     style: TextStyle(
                                       color: _pdfSelected ? Colors.green : Colors.grey,
                                       fontWeight: _pdfSelected ? FontWeight.bold : FontWeight.normal,
@@ -480,7 +440,7 @@ class _BookUploadPageState extends State<BookUploadPage> {
                                         child: CircularProgressIndicator(strokeWidth: 2)
                                       )
                                     : const Icon(Icons.upload_file),
-                                label: Text(isPdfPickerLoading ? 'Selecting...' : 'Select PDF File'),
+                                label: Text(isPdfPickerLoading ? 'Selecting...' : 'Select New PDF File'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: colorScheme.primary,
                                   foregroundColor: colorScheme.onPrimary,
@@ -496,7 +456,7 @@ class _BookUploadPageState extends State<BookUploadPage> {
                   const SizedBox(height: 24),
                   
                   Text(
-                    'Book Cover Image (Optional)',
+                    'Update Cover Image (Optional)',
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -530,7 +490,24 @@ class _BookUploadPageState extends State<BookUploadPage> {
                                   fit: BoxFit.cover,
                                 ),
                               ),
-                            if (_selectedImageFile != null) const SizedBox(height: 16),
+                            if (_selectedImageFile == null && widget.book.bookImage != null)
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: CachedNetworkImage(
+                                  imageUrl: widget.book.bookImage!,
+                                  height: 150,
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                  placeholder: (context, url) => const Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                  errorWidget: (context, url, error) => Center(
+                                    child: Icon(Icons.image_not_supported, color: Colors.grey[400]),
+                                  ),
+                                ),
+                              ),
+                            if (_selectedImageFile != null || widget.book.bookImage != null) 
+                              const SizedBox(height: 16),
                             
                             Row(
                               children: [
@@ -541,7 +518,8 @@ class _BookUploadPageState extends State<BookUploadPage> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    _imageFileName ?? 'No image selected',
+                                    _imageFileName ?? 
+                                    (widget.book.bookImage != null ? 'Current image' : 'No image selected'),
                                     style: TextStyle(
                                       color: _imageSelected ? Colors.green : Colors.grey,
                                       fontWeight: _imageSelected ? FontWeight.bold : FontWeight.normal,
@@ -572,7 +550,7 @@ class _BookUploadPageState extends State<BookUploadPage> {
                                         child: CircularProgressIndicator(strokeWidth: 2)
                                       )
                                     : const Icon(Icons.upload_file),
-                                label: Text(isImagePickerLoading ? 'Selecting...' : 'Select Cover Image'),
+                                label: Text(isImagePickerLoading ? 'Selecting...' : 'Select New Cover Image'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: colorScheme.secondary,
                                   foregroundColor: colorScheme.onSecondary,
@@ -598,7 +576,7 @@ class _BookUploadPageState extends State<BookUploadPage> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Uploading ${(uploadProgress * 100).toStringAsFixed(0)}%',
+                          'Updating ${(uploadProgress * 100).toStringAsFixed(0)}%',
                           style: TextStyle(color: colorScheme.primary),
                         ),
                         const SizedBox(height: 24),
@@ -609,9 +587,9 @@ class _BookUploadPageState extends State<BookUploadPage> {
                     width: double.infinity,
                     height: 50,
                     child: ElevatedButton.icon(
-                      onPressed: (isUploading || !_pdfSelected) ? null : _uploadBook,
-                      icon: Icon(isUploading ? Icons.hourglass_top : Icons.cloud_upload),
-                      label: Text(isUploading ? 'Uploading...' : 'Upload Book'),
+                      onPressed: isUploading ? null : _updateBook,
+                      icon: Icon(isUploading ? Icons.hourglass_top : Icons.save),
+                      label: Text(isUploading ? 'Updating...' : 'Save Changes'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: colorScheme.primary,
                         foregroundColor: colorScheme.onPrimary,

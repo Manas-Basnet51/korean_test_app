@@ -4,14 +4,13 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:equatable/equatable.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:korean_language_app/core/enums/file_upload_type.dart';
 import 'package:korean_language_app/core/services/auth_service.dart';
 import 'package:korean_language_app/features/auth/domain/entities/user.dart';
 import 'package:korean_language_app/features/book_upload/domain/repositories/book_upload_repository.dart';
 import 'package:korean_language_app/features/books/data/models/book_item.dart';
 
 part 'file_upload_state.dart';
-
-enum FileUploadType { pdf, image, media }
 
 class FileUploadCubit extends Cubit<FileUploadState> {
   final BookUploadRepository uploadRepository;
@@ -100,7 +99,6 @@ class FileUploadCubit extends Cubit<FileUploadState> {
     }
     
     try {
-      // Get current user ID
       final user = _getCurrentUser();
       if (user == null) {
         emit(const FileUploadError('User not authenticated', FileUploadType.pdf));
@@ -120,27 +118,25 @@ class FileUploadCubit extends Cubit<FileUploadState> {
       
       emit(const FileUploading(0.3, FileUploadType.pdf));
       
-      // Upload PDF file
       final pdfResult = await uploadRepository.uploadPdfFile(newBookId, pdfFile);
       
-      if (pdfResult.isLeft()) {
-        emit(const FileUploadError('Failed to upload PDF file', FileUploadType.pdf));
+      if (pdfResult.isFailure) {
+        emit(FileUploadError(pdfResult.error ?? 'Failed to upload PDF file', FileUploadType.pdf));
         return false;
       }
       
-      final pdfData = pdfResult.getOrElse(() => {});
+      final pdfData = pdfResult.data ?? {};
       BookItem updatedBook = bookWithId.copyWith(
         pdfUrl: pdfData['url'],
         pdfPath: pdfData['storagePath'],
       );
       
-      // Upload cover image if provided
       if (imageFile != null) {
         emit(const FileUploading(0.6, FileUploadType.pdf));
         final imageResult = await uploadRepository.uploadCoverImage(newBookId, imageFile);
         
-        if (imageResult.isRight()) {
-          final imageData = imageResult.getOrElse(() => {});
+        if (imageResult.isSuccess) {
+          final imageData = imageResult.data ?? {};
           updatedBook = updatedBook.copyWith(
             bookImage: imageData['url'],
             bookImagePath: imageData['storagePath'],
@@ -150,15 +146,14 @@ class FileUploadCubit extends Cubit<FileUploadState> {
       
       emit(const FileUploading(0.8, FileUploadType.pdf));
       
-      // Create book in database
       final createResult = await uploadRepository.createBook(updatedBook);
       
-      if (createResult.isLeft()) {
-        emit(const FileUploadError('Failed to upload book metadata', FileUploadType.pdf));
+      if (createResult.isFailure) {
+        emit(FileUploadError(createResult.error ?? 'Failed to upload book metadata', FileUploadType.pdf));
         return false;
       }
       
-      final finalBook = createResult.getOrElse(() => updatedBook);
+      final finalBook = createResult.data ?? updatedBook;
       emit(FileUploadSuccess(newBookId, FileUploadType.pdf, book: finalBook));
       return true;
     } catch (e) {
@@ -175,7 +170,6 @@ class FileUploadCubit extends Cubit<FileUploadState> {
     }
     
     try {
-      // Check permissions
       final user = _getCurrentUser();
       if (user == null) {
         emit(const FileUploadError('User not authenticated', FileUploadType.pdf));
@@ -183,7 +177,7 @@ class FileUploadCubit extends Cubit<FileUploadState> {
       }
       
       final permissionResult = await uploadRepository.hasEditPermission(bookId, user.uid);
-      if (permissionResult.isLeft() || !permissionResult.getOrElse(() => false)) {
+      if (permissionResult.isFailure || !(permissionResult.data ?? false)) {
         emit(const FileUploadError('You do not have permission to edit this book', FileUploadType.pdf));
         return false;
       }
@@ -194,13 +188,12 @@ class FileUploadCubit extends Cubit<FileUploadState> {
         updatedAt: DateTime.now(),
       );
       
-      // Upload new PDF if provided
       if (pdfFile != null) {
         emit(const FileUploading(0.3, FileUploadType.pdf));
         final pdfResult = await uploadRepository.uploadPdfFile(bookId, pdfFile);
         
-        if (pdfResult.isRight()) {
-          final pdfData = pdfResult.getOrElse(() => {});
+        if (pdfResult.isSuccess) {
+          final pdfData = pdfResult.data ?? {};
           updatedBookWithMeta = updatedBookWithMeta.copyWith(
             pdfUrl: pdfData['url'],
             pdfPath: pdfData['storagePath'],
@@ -208,13 +201,12 @@ class FileUploadCubit extends Cubit<FileUploadState> {
         }
       }
       
-      // Upload new image if provided
       if (imageFile != null) {
         emit(const FileUploading(0.6, FileUploadType.pdf));
         final imageResult = await uploadRepository.uploadCoverImage(bookId, imageFile);
         
-        if (imageResult.isRight()) {
-          final imageData = imageResult.getOrElse(() => {});
+        if (imageResult.isSuccess) {
+          final imageData = imageResult.data ?? {};
           updatedBookWithMeta = updatedBookWithMeta.copyWith(
             bookImage: imageData['url'],
             bookImagePath: imageData['storagePath'],
@@ -224,15 +216,14 @@ class FileUploadCubit extends Cubit<FileUploadState> {
       
       emit(const FileUploading(0.8, FileUploadType.pdf));
       
-      // Update book in database
       final updateResult = await uploadRepository.updateBook(bookId, updatedBookWithMeta);
       
-      if (updateResult.isLeft()) {
-        emit(const FileUploadError('Failed to update book metadata', FileUploadType.pdf));
+      if (updateResult.isFailure) {
+        emit(FileUploadError(updateResult.error ?? 'Failed to update book metadata', FileUploadType.pdf));
         return false;
       }
       
-      final finalBook = updateResult.getOrElse(() => updatedBookWithMeta);
+      final finalBook = updateResult.data ?? updatedBookWithMeta;
       emit(FileUploadSuccess(bookId, FileUploadType.pdf, book: finalBook));
       return true;
     } catch (e) {
@@ -249,7 +240,6 @@ class FileUploadCubit extends Cubit<FileUploadState> {
     }
     
     try {
-      // Check permissions
       final user = _getCurrentUser();
       if (user == null) {
         emit(const FileUploadError('User not authenticated', FileUploadType.pdf));
@@ -257,7 +247,7 @@ class FileUploadCubit extends Cubit<FileUploadState> {
       }
       
       final permissionResult = await uploadRepository.hasDeletePermission(bookId, user.uid);
-      if (permissionResult.isLeft() || !permissionResult.getOrElse(() => false)) {
+      if (permissionResult.isFailure || !(permissionResult.data ?? false)) {
         emit(const FileUploadError('You do not have permission to delete this book', FileUploadType.pdf));
         return false;
       }
@@ -265,8 +255,8 @@ class FileUploadCubit extends Cubit<FileUploadState> {
       emit(FileDeleting(bookId));
       final deleteResult = await uploadRepository.deleteBook(bookId);
       
-      if (deleteResult.isLeft()) {
-        emit(FileDeletionError('Failed to delete book', bookId));
+      if (deleteResult.isFailure) {
+        emit(FileDeletionError(deleteResult.error ?? 'Failed to delete book', bookId));
         return false;
       }
       
@@ -316,4 +306,3 @@ class FileUploadCubit extends Cubit<FileUploadState> {
     }
   }
 }
-

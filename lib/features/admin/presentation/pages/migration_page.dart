@@ -57,24 +57,24 @@ class _MigrationPageState extends State<MigrationPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Migration')),
+      appBar: AppBar(title: const Text('Migration')),
       body: Padding(
-        padding: EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Column(
           children: [
             if (migrationStatus != null) ...[
               Card(
                 child: Padding(
-                  padding: EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(16),
                   child: Column(
                     children: [
                       Text('Old Collection: ${migrationStatus!.oldCollectionCount} documents'),
                       Text('New Collection: ${migrationStatus!.newCollectionCount} documents'),
-                      SizedBox(height: 16),
+                      const SizedBox(height: 16),
                       if (migrationStatus!.canStartMigration)
                         ElevatedButton(
                           onPressed: _startMigration,
-                          child: Text('Start Migration'),
+                          child: const Text('Start Migration'),
                         ),
                       if (migrationStatus!.isCompleted)
                         ElevatedButton(
@@ -82,7 +82,7 @@ class _MigrationPageState extends State<MigrationPage> {
                             await migrationService.deleteOldCollection();
                             await _loadMigrationStatus();
                           },
-                          child: Text('Delete Old Collection'),
+                          child: const Text('Delete Old Collection'),
                         ),
                     ],
                   ),

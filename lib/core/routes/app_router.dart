@@ -8,7 +8,7 @@ import 'package:korean_language_app/features/auth/presentation/bloc/auth_cubit.d
 import 'package:korean_language_app/features/auth/presentation/pages/forgot_password_page.dart';
 import 'package:korean_language_app/features/auth/presentation/pages/login_page.dart';
 import 'package:korean_language_app/features/auth/presentation/pages/register_page.dart';
-import 'package:korean_language_app/features/books/presentation/pages/book_edit_page.dart';
+import 'package:korean_language_app/features/book_upload/presentation/pages/book_edit_page.dart';
 import 'package:korean_language_app/features/books/presentation/pages/books_page.dart';
 import 'package:korean_language_app/features/books/presentation/pages/favorite_books_page.dart';
 import 'package:korean_language_app/features/books/presentation/pages/pdf_viewer_page.dart';
