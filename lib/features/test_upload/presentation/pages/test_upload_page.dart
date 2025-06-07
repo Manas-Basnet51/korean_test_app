@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:korean_language_app/core/enums/book_level.dart';
 import 'package:korean_language_app/core/enums/test_category.dart';
-import 'package:korean_language_app/core/enums/question_type.dart';
 import 'package:korean_language_app/core/presentation/language_preference/bloc/language_preference_cubit.dart';
 import 'package:korean_language_app/core/presentation/snackbar/bloc/snackbar_cubit.dart';
 import 'package:korean_language_app/features/auth/presentation/bloc/auth_cubit.dart';
@@ -56,22 +55,51 @@ class _TestUploadPageState extends State<TestUploadPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Scaffold(
+      backgroundColor: colorScheme.surface,
       appBar: AppBar(
+        elevation: 0,
+        backgroundColor: colorScheme.surface,
+        surfaceTintColor: Colors.transparent,
         title: Text(
           _languageCubit.getLocalizedText(
-            korean: '시험 만들기',
+            korean: '새 시험 만들기',
             english: 'Create Test',
+          ),
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w600,
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: _isUploading ? null : _uploadTest,
-            child: Text(
-              _languageCubit.getLocalizedText(
-                korean: '업로드',
-                english: 'Upload',
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: TextButton(
+              onPressed: _isUploading ? null : _uploadTest,
+              style: TextButton.styleFrom(
+                backgroundColor: _isUploading ? Colors.grey.shade300 : colorScheme.primary,
+                foregroundColor: _isUploading ? Colors.grey.shade600 : colorScheme.onPrimary,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
+              child: _isUploading
+                  ? SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.grey.shade600),
+                      ),
+                    )
+                  : Text(
+                      _languageCubit.getLocalizedText(
+                        korean: '업로드',
+                        english: 'Upload',
+                      ),
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
             ),
           ),
         ],
@@ -99,481 +127,603 @@ class _TestUploadPageState extends State<TestUploadPage> {
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildBasicInfoSection(),
-                const SizedBox(height: 24),
-                _buildSettingsSection(),
-                const SizedBox(height: 24),
-                _buildImageSection(),
-                const SizedBox(height: 24),
-                _buildQuestionsSection(),
+                _buildProgressSection(),
                 const SizedBox(height: 32),
-                if (_isUploading) _buildUploadingIndicator(),
+                _buildBasicInfoSection(),
+                const SizedBox(height: 32),
+                _buildSettingsSection(),
+                const SizedBox(height: 32),
+                _buildImageSection(),
+                const SizedBox(height: 32),
+                _buildQuestionsSection(),
+                const SizedBox(height: 100),
               ],
             ),
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _addQuestion,
-        tooltip: _languageCubit.getLocalizedText(
-          korean: '문제 추가',
-          english: 'Add Question',
-        ),
-        child: const Icon(Icons.add),
+    );
+  }
+
+  Widget _buildProgressSection() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
+    int completedSteps = 0;
+    if (_titleController.text.isNotEmpty && _descriptionController.text.isNotEmpty) completedSteps++;
+    if (_questions.isNotEmpty) completedSteps++;
+    
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.primaryContainer.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                _languageCubit.getLocalizedText(
+                  korean: '진행 상황',
+                  english: 'Progress',
+                ),
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '$completedSteps/2',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          LinearProgressIndicator(
+            value: completedSteps / 2,
+            backgroundColor: colorScheme.onSurfaceVariant.withOpacity(0.2),
+            valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary),
+            borderRadius: BorderRadius.circular(4),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildBasicInfoSection() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _languageCubit.getLocalizedText(
-                korean: '기본 정보',
-                english: 'Basic Information',
-              ),
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            
-            TextFormField(
-              controller: _titleController,
-              decoration: InputDecoration(
-                labelText: _languageCubit.getLocalizedText(
-                  korean: '시험 제목',
-                  english: 'Test Title',
-                ),
-                hintText: _languageCubit.getLocalizedText(
-                  korean: '시험 제목을 입력하세요',
-                  english: 'Enter test title',
-                ),
-              ),
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return _languageCubit.getLocalizedText(
-                    korean: '제목을 입력해주세요',
-                    english: 'Please enter a title',
-                  );
-                }
-                return null;
-              },
-            ),
-            
-            const SizedBox(height: 16),
-            
-            TextFormField(
-              controller: _descriptionController,
-              decoration: InputDecoration(
-                labelText: _languageCubit.getLocalizedText(
-                  korean: '설명',
-                  english: 'Description',
-                ),
-                hintText: _languageCubit.getLocalizedText(
-                  korean: '시험에 대한 설명을 입력하세요',
-                  english: 'Enter test description',
-                ),
-              ),
-              maxLines: 3,
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return _languageCubit.getLocalizedText(
-                    korean: '설명을 입력해주세요',
-                    english: 'Please enter a description',
-                  );
-                }
-                return null;
-              },
-            ),
-          ],
+    final theme = Theme.of(context);
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _languageCubit.getLocalizedText(
+            korean: '기본 정보',
+            english: 'Basic Information',
+          ),
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
         ),
-      ),
+        const SizedBox(height: 16),
+        
+        TextFormField(
+          controller: _titleController,
+          decoration: InputDecoration(
+            labelText: _languageCubit.getLocalizedText(
+              korean: '시험 제목',
+              english: 'Test Title',
+            ),
+            hintText: _languageCubit.getLocalizedText(
+              korean: '예: 기초 한국어 문법 테스트',
+              english: 'e.g. Basic Korean Grammar Test',
+            ),
+          ),
+          validator: (value) {
+            if (value == null || value.trim().isEmpty) {
+              return _languageCubit.getLocalizedText(
+                korean: '제목을 입력해주세요',
+                english: 'Please enter a title',
+              );
+            }
+            return null;
+          },
+          onChanged: (value) => setState(() {}),
+        ),
+        
+        const SizedBox(height: 16),
+        
+        TextFormField(
+          controller: _descriptionController,
+          decoration: InputDecoration(
+            labelText: _languageCubit.getLocalizedText(
+              korean: '설명',
+              english: 'Description',
+            ),
+            hintText: _languageCubit.getLocalizedText(
+              korean: '시험에 대한 설명을 입력하세요',
+              english: 'Enter test description',
+            ),
+            alignLabelWithHint: true,
+          ),
+          maxLines: 3,
+          validator: (value) {
+            if (value == null || value.trim().isEmpty) {
+              return _languageCubit.getLocalizedText(
+                korean: '설명을 입력해주세요',
+                english: 'Please enter a description',
+              );
+            }
+            return null;
+          },
+          onChanged: (value) => setState(() {}),
+        ),
+      ],
     );
   }
 
   Widget _buildSettingsSection() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    final theme = Theme.of(context);
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _languageCubit.getLocalizedText(
+            korean: '시험 설정',
+            english: 'Test Settings',
+          ),
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 16),
+        
+        Row(
           children: [
-            Text(
-              _languageCubit.getLocalizedText(
-                korean: '시험 설정',
-                english: 'Test Settings',
-              ),
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
+            Expanded(
+              child: DropdownButtonFormField<BookLevel>(
+                value: _selectedLevel,
+                decoration: InputDecoration(
+                  labelText: _languageCubit.getLocalizedText(
+                    korean: '난이도',
+                    english: 'Level',
+                  ),
+                ),
+                items: BookLevel.values.map((level) {
+                  return DropdownMenuItem(
+                    value: level,
+                    child: Text(level.getName(_languageCubit)),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() {
+                      _selectedLevel = value;
+                    });
+                  }
+                },
               ),
             ),
-            const SizedBox(height: 16),
-            
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<BookLevel>(
-                    value: _selectedLevel,
-                    decoration: InputDecoration(
-                      labelText: _languageCubit.getLocalizedText(
-                        korean: '난이도',
-                        english: 'Level',
-                      ),
-                    ),
-                    items: BookLevel.values.map((level) {
-                      return DropdownMenuItem(
-                        value: level,
-                        child: Text(level.getName(_languageCubit)),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() {
-                          _selectedLevel = value;
-                        });
-                      }
-                    },
+            const SizedBox(width: 16),
+            Expanded(
+              child: DropdownButtonFormField<TestCategory>(
+                value: _selectedCategory,
+                decoration: InputDecoration(
+                  labelText: _languageCubit.getLocalizedText(
+                    korean: '카테고리',
+                    english: 'Category',
                   ),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: DropdownButtonFormField<TestCategory>(
-                    value: _selectedCategory,
-                    decoration: InputDecoration(
-                      labelText: _languageCubit.getLocalizedText(
-                        korean: '카테고리',
-                        english: 'Category',
-                      ),
-                    ),
-                    items: TestCategory.values
-                        .where((cat) => cat != TestCategory.all)
-                        .map((category) {
-                      return DropdownMenuItem(
-                        value: category,
-                        child: Text(category.name),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() {
-                          _selectedCategory = value;
-                        });
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
-            
-            const SizedBox(height: 16),
-            
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _timeLimitController,
-                    decoration: InputDecoration(
-                      labelText: _languageCubit.getLocalizedText(
-                        korean: '제한 시간 (분)',
-                        english: 'Time Limit (minutes)',
-                      ),
-                      hintText: '0 = 무제한',
-                    ),
-                    keyboardType: TextInputType.number,
-                    validator: (value) {
-                      if (value != null && value.isNotEmpty) {
-                        final timeLimit = int.tryParse(value);
-                        if (timeLimit == null || timeLimit < 0) {
-                          return _languageCubit.getLocalizedText(
-                            korean: '올바른 숫자를 입력해주세요',
-                            english: 'Please enter a valid number',
-                          );
-                        }
-                      }
-                      return null;
-                    },
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: TextFormField(
-                    controller: _passingScoreController,
-                    decoration: InputDecoration(
-                      labelText: _languageCubit.getLocalizedText(
-                        korean: '합격 점수 (%)',
-                        english: 'Passing Score (%)',
-                      ),
-                    ),
-                    keyboardType: TextInputType.number,
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return _languageCubit.getLocalizedText(
-                          korean: '합격 점수를 입력해주세요',
-                          english: 'Please enter passing score',
-                        );
-                      }
-                      final score = int.tryParse(value);
-                      if (score == null || score < 0 || score > 100) {
-                        return _languageCubit.getLocalizedText(
-                          korean: '0-100 사이의 숫자를 입력해주세요',
-                          english: 'Please enter a number between 0-100',
-                        );
-                      }
-                      return null;
-                    },
-                  ),
-                ),
-              ],
-            ),
-            
-            const SizedBox(height: 16),
-            
-            SwitchListTile(
-              title: Text(
-                _languageCubit.getLocalizedText(
-                  korean: '시험 공개',
-                  english: 'Publish Test',
-                ),
+                items: TestCategory.values
+                    .where((cat) => cat != TestCategory.all)
+                    .map((category) {
+                  return DropdownMenuItem(
+                    value: category,
+                    child: Text(category.name),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() {
+                      _selectedCategory = value;
+                    });
+                  }
+                },
               ),
-              subtitle: Text(
-                _languageCubit.getLocalizedText(
-                  korean: '다른 사용자가 이 시험을 볼 수 있습니다',
-                  english: 'Other users can see this test',
-                ),
-              ),
-              value: _isPublished,
-              onChanged: (value) {
-                setState(() {
-                  _isPublished = value;
-                });
-              },
             ),
           ],
         ),
-      ),
+        
+        const SizedBox(height: 16),
+        
+        Row(
+          children: [
+            Expanded(
+              child: TextFormField(
+                controller: _timeLimitController,
+                decoration: InputDecoration(
+                  labelText: _languageCubit.getLocalizedText(
+                    korean: '제한 시간 (분)',
+                    english: 'Time Limit (minutes)',
+                  ),
+                  hintText: '0 = 무제한',
+                ),
+                keyboardType: TextInputType.number,
+                validator: (value) {
+                  if (value != null && value.isNotEmpty) {
+                    final timeLimit = int.tryParse(value);
+                    if (timeLimit == null || timeLimit < 0) {
+                      return _languageCubit.getLocalizedText(
+                        korean: '올바른 숫자를 입력해주세요',
+                        english: 'Please enter a valid number',
+                      );
+                    }
+                  }
+                  return null;
+                },
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: TextFormField(
+                controller: _passingScoreController,
+                decoration: InputDecoration(
+                  labelText: _languageCubit.getLocalizedText(
+                    korean: '합격 점수 (%)',
+                    english: 'Passing Score (%)',
+                  ),
+                ),
+                keyboardType: TextInputType.number,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return _languageCubit.getLocalizedText(
+                      korean: '합격 점수를 입력해주세요',
+                      english: 'Please enter passing score',
+                    );
+                  }
+                  final score = int.tryParse(value);
+                  if (score == null || score < 0 || score > 100) {
+                    return _languageCubit.getLocalizedText(
+                      korean: '0-100 사이의 숫자를 입력해주세요',
+                      english: 'Please enter a number between 0-100',
+                    );
+                  }
+                  return null;
+                },
+              ),
+            ),
+          ],
+        ),
+        
+        const SizedBox(height: 20),
+        
+        SwitchListTile(
+          title: Text(
+            _languageCubit.getLocalizedText(
+              korean: '시험 공개',
+              english: 'Publish Test',
+            ),
+          ),
+          subtitle: Text(
+            _languageCubit.getLocalizedText(
+              korean: '다른 사용자가 이 시험을 볼 수 있습니다',
+              english: 'Other users can access this test',
+            ),
+          ),
+          value: _isPublished,
+          onChanged: (value) {
+            setState(() {
+              _isPublished = value;
+            });
+          },
+          contentPadding: EdgeInsets.zero,
+        ),
+      ],
     );
   }
 
   Widget _buildImageSection() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _languageCubit.getLocalizedText(
-                korean: '시험 커버 이미지',
-                english: 'Test Cover Image',
-              ),
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            
-            if (_selectedImage != null)
-              Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.file(
-                      _selectedImage!,
-                      height: 200,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: CircleAvatar(
-                      backgroundColor: Colors.red,
-                      child: IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white),
-                        onPressed: () {
-                          setState(() {
-                            _selectedImage = null;
-                          });
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            else
-              InkWell(
-                onTap: _pickImage,
-                child: Container(
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _languageCubit.getLocalizedText(
+            korean: '커버 이미지 (선택사항)',
+            english: 'Cover Image (Optional)',
+          ),
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 16),
+        
+        if (_selectedImage != null)
+          Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.file(
+                  _selectedImage!,
                   height: 200,
                   width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey[400]!, style: BorderStyle.solid),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.add_photo_alternate, size: 48, color: Colors.grey[600]),
-                      const SizedBox(height: 8),
-                      Text(
-                        _languageCubit.getLocalizedText(
-                          korean: '커버 이미지 선택 (선택사항)',
-                          english: 'Select Cover Image (Optional)',
-                        ),
-                        style: TextStyle(color: Colors.grey[600]),
-                      ),
-                    ],
+                  fit: BoxFit.cover,
+                ),
+              ),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _selectedImage = null;
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.close,
+                      color: Colors.white,
+                      size: 16,
+                    ),
                   ),
                 ),
               ),
-          ],
-        ),
-      ),
+            ],
+          )
+        else
+          GestureDetector(
+            onTap: _pickImage,
+            child: Container(
+              height: 160,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: colorScheme.outline.withOpacity(0.3),
+                  style: BorderStyle.solid,
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.add_photo_alternate_outlined,
+                    size: 40,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _languageCubit.getLocalizedText(
+                      korean: '이미지 추가',
+                      english: 'Add Image',
+                    ),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 
   Widget _buildQuestionsSection() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            Text(
+              _languageCubit.getLocalizedText(
+                korean: '문제',
+                english: 'Questions',
+              ),
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: _questions.isEmpty 
+                    ? colorScheme.errorContainer.withOpacity(0.3)
+                    : colorScheme.primaryContainer.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '${_questions.length}',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: _questions.isEmpty 
+                      ? colorScheme.onErrorContainer
+                      : colorScheme.onPrimaryContainer,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        
+        if (_questions.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
               children: [
+                Icon(
+                  Icons.quiz_outlined,
+                  size: 48,
+                  color: colorScheme.onSurfaceVariant.withOpacity(0.6),
+                ),
+                const SizedBox(height: 16),
                 Text(
                   _languageCubit.getLocalizedText(
-                    korean: '문제 목록',
-                    english: 'Questions',
+                    korean: '아직 문제가 없습니다',
+                    english: 'No questions yet',
                   ),
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
                   ),
                 ),
+                const SizedBox(height: 8),
                 Text(
-                  '${_questions.length} ${_languageCubit.getLocalizedText(korean: '문제', english: 'questions')}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.grey[600],
+                  _languageCubit.getLocalizedText(
+                    korean: '첫 번째 문제를 추가해보세요',
+                    english: 'Add your first question to get started',
+                  ),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton.icon(
+                  onPressed: _addQuestion,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: Text(
+                    _languageCubit.getLocalizedText(
+                      korean: '첫 번째 문제 추가',
+                      english: 'Add First Question',
+                    ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            
-            if (_questions.isEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  children: [
-                    Icon(Icons.quiz_outlined, size: 48, color: Colors.grey[400]),
-                    const SizedBox(height: 16),
-                    Text(
-                      _languageCubit.getLocalizedText(
-                        korean: '아직 문제가 없습니다',
-                        english: 'No questions yet',
-                      ),
-                      style: TextStyle(color: Colors.grey[600]),
+          )
+        else ...[
+          ...List.generate(_questions.length, (index) {
+            final question = _questions[index];
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: colorScheme.outlineVariant),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: colorScheme.primary,
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _languageCubit.getLocalizedText(
-                        korean: '+ 버튼을 눌러 문제를 추가하세요',
-                        english: 'Tap the + button to add questions',
-                      ),
-                      style: TextStyle(color: Colors.grey[500], fontSize: 12),
-                    ),
-                  ],
-                ),
-              )
-            else
-              ...List.generate(_questions.length, (index) {
-                final question = _questions[index];
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      child: Text('${index + 1}'),
-                    ),
-                    title: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            question.question.isNotEmpty 
-                                ? question.question 
-                                : _languageCubit.getLocalizedText(korean: '이미지 문제', english: 'Image Question'),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                    child: Center(
+                      child: Text(
+                        '${index + 1}',
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: colorScheme.onPrimary,
+                          fontWeight: FontWeight.w600,
                         ),
-                        if (question.hasQuestionImage)
-                          Container(
-                            margin: const EdgeInsets.only(left: 8),
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Icon(Icons.image, size: 16, color: Colors.blue),
-                          ),
-                      ],
+                      ),
                     ),
-                    subtitle: Column(
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(question.questionType.displayName),
-                        Text('${question.options.length} ${_languageCubit.getLocalizedText(korean: '선택지', english: 'options')}'),
+                        Text(
+                          question.question.isNotEmpty 
+                              ? question.question 
+                              : _languageCubit.getLocalizedText(korean: '이미지 문제', english: 'Image Question'),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Text(
+                              '${question.options.length} ${_languageCubit.getLocalizedText(korean: '선택지', english: 'options')}',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            if (question.hasQuestionImage) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'IMG',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: Colors.blue,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                       ],
                     ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit),
-                          onPressed: () => _editQuestion(index),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete),
-                          onPressed: () => _deleteQuestion(index),
-                        ),
-                      ],
-                    ),
-                    onTap: () => _editQuestion(index),
                   ),
-                );
-              }),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildUploadingIndicator() {
-    return Center(
-      child: Column(
-        children: [
-          const CircularProgressIndicator(),
+                  IconButton(
+                    icon: Icon(Icons.edit_outlined, color: colorScheme.primary),
+                    onPressed: () => _editQuestion(index),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.delete_outline, color: colorScheme.error),
+                    onPressed: () => _deleteQuestion(index),
+                  ),
+                ],
+              ),
+            );
+          }),
           const SizedBox(height: 16),
-          Text(
-            _languageCubit.getLocalizedText(
-              korean: '시험을 업로드하는 중...',
-              english: 'Uploading test...',
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _addQuestion,
+              icon: const Icon(Icons.add, size: 18),
+              label: Text(
+                _languageCubit.getLocalizedText(
+                  korean: '문제 추가',
+                  english: 'Add Question',
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
             ),
           ),
         ],
-      ),
+      ],
     );
   }
 
@@ -587,11 +737,38 @@ class _TestUploadPageState extends State<TestUploadPage> {
   }
 
   void _addQuestion() {
-    _showQuestionDialog();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => QuestionEditorPage(
+          onSave: (newQuestion) {
+            setState(() {
+              _questions.add(newQuestion);
+            });
+          },
+          languageCubit: _languageCubit,
+          snackBarCubit: _snackBarCubit,
+        ),
+        fullscreenDialog: true,
+      ),
+    );
   }
 
   void _editQuestion(int index) {
-    _showQuestionDialog(question: _questions[index], index: index);
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => QuestionEditorPage(
+          question: _questions[index],
+          onSave: (newQuestion) {
+            setState(() {
+              _questions[index] = newQuestion;
+            });
+          },
+          languageCubit: _languageCubit,
+          snackBarCubit: _snackBarCubit,
+        ),
+        fullscreenDialog: true,
+      ),
+    );
   }
 
   void _deleteQuestion(int index) {
@@ -627,6 +804,7 @@ class _TestUploadPageState extends State<TestUploadPage> {
               });
               Navigator.pop(context);
             },
+            style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
             child: Text(
               _languageCubit.getLocalizedText(
                 korean: '삭제',
@@ -635,28 +813,6 @@ class _TestUploadPageState extends State<TestUploadPage> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  void _showQuestionDialog({TestQuestion? question, int? index}) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => QuestionEditorPage(
-          question: question,
-          onSave: (newQuestion) {
-            setState(() {
-              if (index != null) {
-                _questions[index] = newQuestion;
-              } else {
-                _questions.add(newQuestion);
-              }
-            });
-          },
-          languageCubit: _languageCubit,
-          snackBarCubit: _snackBarCubit,
-        ),
-        fullscreenDialog: true,
       ),
     );
   }
@@ -716,4 +872,3 @@ class _TestUploadPageState extends State<TestUploadPage> {
     }
   }
 }
-
