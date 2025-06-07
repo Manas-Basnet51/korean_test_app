@@ -91,4 +91,27 @@ class AnswerOption {
       isImage: isImage ?? this.isImage,
     );
   }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is AnswerOption &&
+        other.text == text &&
+        other.imageUrl == imageUrl &&
+        other.imagePath == imagePath &&
+        other.isImage == isImage;
+  }
+
+  @override
+  int get hashCode {
+    return text.hashCode ^
+        imageUrl.hashCode ^
+        imagePath.hashCode ^
+        isImage.hashCode;
+  }
+
+  @override
+  String toString() {
+    return 'AnswerOption(text: $text, imageUrl: $imageUrl, imagePath: $imagePath, isImage: $isImage)';
+  }
 }

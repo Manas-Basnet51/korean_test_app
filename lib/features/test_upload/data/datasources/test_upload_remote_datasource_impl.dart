@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:korean_language_app/core/utils/exception_mapper.dart';
 import 'package:korean_language_app/features/test_upload/data/datasources/test_upload_remote_datasource.dart';
 import 'package:korean_language_app/core/models/test_item.dart';
+import 'package:korean_language_app/core/models/test_question.dart';
+import 'package:korean_language_app/core/enums/question_type.dart';
 
 class FirestoreTestUploadDataSourceImpl implements TestUploadRemoteDataSource {
   final FirebaseFirestore firestore;
@@ -31,18 +33,27 @@ class FirestoreTestUploadDataSourceImpl implements TestUploadRemoteDataSource {
       final testId = docRef.id;
       var finalTest = test.copyWith(id: testId);
       
-      String? uploadedImagePath;
+      final uploadedPaths = <String>[];
       
       try {
-        // Upload image first if provided
+        // Upload cover image first if provided
         if (imageFile != null) {
-          final (imageUrl, imagePath) = await _uploadTestImage(testId, imageFile);
-          uploadedImagePath = imagePath;
+          final (imageUrl, imagePath) = await _uploadCoverImage(testId, imageFile);
+          uploadedPaths.add(imagePath);
           finalTest = finalTest.copyWith(
             imageUrl: imageUrl,
             imagePath: imagePath,
           );
         }
+        
+        // Upload all question and answer images
+        final updatedQuestions = <TestQuestion>[];
+        for (final question in finalTest.questions) {
+          final updatedQuestion = await _uploadQuestionImages(testId, question, uploadedPaths);
+          updatedQuestions.add(updatedQuestion);
+        }
+        
+        finalTest = finalTest.copyWith(questions: updatedQuestions);
         
         // Now create the test document with all data
         final testData = finalTest.toJson();
@@ -59,10 +70,8 @@ class FirestoreTestUploadDataSourceImpl implements TestUploadRemoteDataSource {
         );
         
       } catch (e) {
-        // Clean up uploaded image on failure
-        if (uploadedImagePath != null) {
-          await _deleteImageByPath(uploadedImagePath);
-        }
+        // Clean up uploaded files on failure
+        await _cleanupUploadedFiles(uploadedPaths);
         throw Exception('Failed to create test: $e');
       }
     } on FirebaseException catch (e) {
@@ -85,19 +94,56 @@ class FirestoreTestUploadDataSourceImpl implements TestUploadRemoteDataSource {
       final existingData = docSnapshot.data() as Map<String, dynamic>;
       var finalTest = updatedTest;
       
-      String? newImagePath;
-      String? oldImagePath = existingData['imagePath'] as String?;
+      final newUploadedPaths = <String>[];
+      final oldPaths = <String>[];
       
       try {
-        // Upload new image if provided
+        // Collect old paths for cleanup
+        if (existingData.containsKey('imagePath') && existingData['imagePath'] != null) {
+          oldPaths.add(existingData['imagePath'] as String);
+        }
+        
+        // Collect old question and answer image paths
+        if (existingData.containsKey('questions') && existingData['questions'] is List) {
+          final existingQuestions = existingData['questions'] as List;
+          for (final questionData in existingQuestions) {
+            if (questionData is Map<String, dynamic>) {
+              if (questionData.containsKey('questionImagePath') && questionData['questionImagePath'] != null) {
+                oldPaths.add(questionData['questionImagePath'] as String);
+              }
+              
+              if (questionData.containsKey('options') && questionData['options'] is List) {
+                final options = questionData['options'] as List;
+                for (final option in options) {
+                  if (option is Map<String, dynamic> && 
+                      option.containsKey('imagePath') && 
+                      option['imagePath'] != null) {
+                    oldPaths.add(option['imagePath'] as String);
+                  }
+                }
+              }
+            }
+          }
+        }
+        
+        // Upload new cover image if provided
         if (imageFile != null) {
-          final (imageUrl, imagePath) = await _uploadTestImage(testId, imageFile);
-          newImagePath = imagePath;
+          final (imageUrl, imagePath) = await _uploadCoverImage(testId, imageFile);
+          newUploadedPaths.add(imagePath);
           finalTest = finalTest.copyWith(
             imageUrl: imageUrl,
             imagePath: imagePath,
           );
         }
+        
+        // Upload all question and answer images
+        final updatedQuestions = <TestQuestion>[];
+        for (final question in finalTest.questions) {
+          final updatedQuestion = await _uploadQuestionImages(testId, question, newUploadedPaths);
+          updatedQuestions.add(updatedQuestion);
+        }
+        
+        finalTest = finalTest.copyWith(questions: updatedQuestions);
         
         // Update the document
         final updateData = finalTest.toJson();
@@ -107,19 +153,14 @@ class FirestoreTestUploadDataSourceImpl implements TestUploadRemoteDataSource {
         
         await docRef.update(updateData);
         
-        // Only delete old image after successful update
-        if (newImagePath != null && oldImagePath != null && oldImagePath != newImagePath) {
-          await _deleteImageByPath(oldImagePath);
-        }
+        // Clean up old files after successful update
+        await _cleanupUploadedFiles(oldPaths);
         
-        // Return the updated test with current timestamp
         return finalTest.copyWith(updatedAt: DateTime.now());
         
       } catch (e) {
-        // Clean up newly uploaded image on failure
-        if (newImagePath != null) {
-          await _deleteImageByPath(newImagePath);
-        }
+        // Clean up newly uploaded files on failure
+        await _cleanupUploadedFiles(newUploadedPaths);
         rethrow;
       }
     } on FirebaseException catch (e) {
@@ -221,10 +262,10 @@ class FirestoreTestUploadDataSourceImpl implements TestUploadRemoteDataSource {
     }
   }
 
-  /// Private helper method to upload test image atomically
-  Future<(String, String)> _uploadTestImage(String testId, File imageFile) async {
+  /// Upload cover image for the test
+  Future<(String, String)> _uploadCoverImage(String testId, File imageFile) async {
     try {
-      final storagePath = 'tests/$testId/test_image.jpg';
+      final storagePath = 'tests/$testId/cover_image.jpg';
       final fileRef = storage.ref().child(storagePath);
       
       final uploadTask = await fileRef.putFile(
@@ -235,46 +276,166 @@ class FirestoreTestUploadDataSourceImpl implements TestUploadRemoteDataSource {
       final downloadUrl = await uploadTask.ref.getDownloadURL();
       
       if (downloadUrl.isEmpty) {
-        throw Exception('Failed to get download URL for uploaded image');
+        throw Exception('Failed to get download URL for uploaded cover image');
       }
       
       return (downloadUrl, storagePath);
     } catch (e) {
-      throw Exception('Image upload failed: $e');
+      throw Exception('Cover image upload failed: $e');
     }
   }
 
-  /// Private helper method to delete image by storage path
-  Future<void> _deleteImageByPath(String storagePath) async {
-    try {
-      if (storagePath.isNotEmpty) {
-        final fileRef = storage.ref().child(storagePath);
-        await fileRef.delete();
-      }
-    } catch (e) {
-      // Log but don't throw - deletion of old image shouldn't block update
-      if (kDebugMode) {
-        print('Failed to delete image at $storagePath: $e');
-      }
-    }
-  }
-
-  /// Private helper method to delete all associated files
-  Future<void> _deleteAssociatedFiles(Map<String, dynamic> data) async {
-    // Delete image by path if exists
-    if (data.containsKey('imagePath') && data['imagePath'] != null) {
-      await _deleteImageByPath(data['imagePath'] as String);
+  /// Upload question and answer images
+  Future<TestQuestion> _uploadQuestionImages(String testId, TestQuestion question, List<String> uploadedPaths) async {
+    var updatedQuestion = question;
+    
+    // Upload question image if it has a local file path
+    if (question.questionImagePath != null && 
+        question.questionImagePath!.startsWith('/') && 
+        File(question.questionImagePath!).existsSync()) {
+      
+      final questionImageFile = File(question.questionImagePath!);
+      final (questionImageUrl, questionImagePath) = await _uploadQuestionImage(testId, question.id, questionImageFile);
+      uploadedPaths.add(questionImagePath);
+      
+      updatedQuestion = updatedQuestion.copyWith(
+        questionImageUrl: questionImageUrl,
+        questionImagePath: questionImagePath,
+      );
     }
     
-    // Fallback: delete by URL
+    // Upload answer images
+    final updatedOptions = <AnswerOption>[];
+    for (int i = 0; i < question.options.length; i++) {
+      final option = question.options[i];
+      
+      if (option.isImage && 
+          option.imagePath != null && 
+          option.imagePath!.startsWith('/') && 
+          File(option.imagePath!).existsSync()) {
+        
+        final answerImageFile = File(option.imagePath!);
+        final (answerImageUrl, answerImagePath) = await _uploadAnswerImage(testId, question.id, i, answerImageFile);
+        uploadedPaths.add(answerImagePath);
+        
+        updatedOptions.add(option.copyWith(
+          imageUrl: answerImageUrl,
+          imagePath: answerImagePath,
+        ));
+      } else {
+        updatedOptions.add(option);
+      }
+    }
+    
+    return updatedQuestion.copyWith(options: updatedOptions);
+  }
+
+  /// Upload question image
+  Future<(String, String)> _uploadQuestionImage(String testId, String questionId, File imageFile) async {
+    try {
+      final storagePath = 'tests/$testId/questions/$questionId/question_image.jpg';
+      final fileRef = storage.ref().child(storagePath);
+      
+      final uploadTask = await fileRef.putFile(
+        imageFile,
+        SettableMetadata(contentType: 'image/jpeg')
+      );
+      
+      final downloadUrl = await uploadTask.ref.getDownloadURL();
+      
+      if (downloadUrl.isEmpty) {
+        throw Exception('Failed to get download URL for question image');
+      }
+      
+      return (downloadUrl, storagePath);
+    } catch (e) {
+      throw Exception('Question image upload failed: $e');
+    }
+  }
+
+  /// Upload answer image
+  Future<(String, String)> _uploadAnswerImage(String testId, String questionId, int answerIndex, File imageFile) async {
+    try {
+      final storagePath = 'tests/$testId/questions/$questionId/answers/$answerIndex.jpg';
+      final fileRef = storage.ref().child(storagePath);
+      
+      final uploadTask = await fileRef.putFile(
+        imageFile,
+        SettableMetadata(contentType: 'image/jpeg')
+      );
+      
+      final downloadUrl = await uploadTask.ref.getDownloadURL();
+      
+      if (downloadUrl.isEmpty) {
+        throw Exception('Failed to get download URL for answer image');
+      }
+      
+      return (downloadUrl, storagePath);
+    } catch (e) {
+      throw Exception('Answer image upload failed: $e');
+    }
+  }
+
+  /// Clean up uploaded files
+  Future<void> _cleanupUploadedFiles(List<String> paths) async {
+    for (final path in paths) {
+      try {
+        if (path.isNotEmpty) {
+          final fileRef = storage.ref().child(path);
+          await fileRef.delete();
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('Failed to delete file at $path: $e');
+        }
+      }
+    }
+  }
+
+  /// Delete all associated files for a test
+  Future<void> _deleteAssociatedFiles(Map<String, dynamic> data) async {
+    final pathsToDelete = <String>[];
+    
+    // Collect cover image path
+    if (data.containsKey('imagePath') && data['imagePath'] != null) {
+      pathsToDelete.add(data['imagePath'] as String);
+    }
+    
+    // Collect question and answer image paths
+    if (data.containsKey('questions') && data['questions'] is List) {
+      final questions = data['questions'] as List;
+      for (final questionData in questions) {
+        if (questionData is Map<String, dynamic>) {
+          // Question image path
+          if (questionData.containsKey('questionImagePath') && questionData['questionImagePath'] != null) {
+            pathsToDelete.add(questionData['questionImagePath'] as String);
+          }
+          
+          // Answer image paths
+          if (questionData.containsKey('options') && questionData['options'] is List) {
+            final options = questionData['options'] as List;
+            for (final option in options) {
+              if (option is Map<String, dynamic> && 
+                  option.containsKey('imagePath') && 
+                  option['imagePath'] != null) {
+                pathsToDelete.add(option['imagePath'] as String);
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    await _cleanupUploadedFiles(pathsToDelete);
+    
+    // Fallback: delete by URL for cover image
     if (data.containsKey('imageUrl') && data['imageUrl'] != null) {
       try {
         final imageRef = storage.refFromURL(data['imageUrl'] as String);
         await imageRef.delete();
       } catch (e) {
-        // Log but continue
         if (kDebugMode) {
-          print('Failed to delete image by URL: $e');
+          print('Failed to delete cover image by URL: $e');
         }
       }
     }

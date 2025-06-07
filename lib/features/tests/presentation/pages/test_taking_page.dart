@@ -431,13 +431,13 @@ class _TestTakingPageState extends State<TestTakingPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Question image if available
-          if (question.imageUrl != null && question.imageUrl!.isNotEmpty)
+          if (question.questionImageUrl != null && question.questionImageUrl!.isNotEmpty)
             Container(
               margin: const EdgeInsets.only(bottom: 16),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
                 child: CachedNetworkImage(
-                  imageUrl: question.imageUrl!,
+                  imageUrl: question.questionImageUrl!,
                   fit: BoxFit.cover,
                   placeholder: (context, url) => Container(
                     height: 200,
