@@ -1,7 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:korean_language_app/core/enums/book_level.dart';
-import 'package:korean_language_app/features/tests/data/models/test_item.dart';
+import 'package:korean_language_app/core/models/test_item.dart';
 
 class TestCard extends StatelessWidget {
   final TestItem test;

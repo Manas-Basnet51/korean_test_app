@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:korean_language_app/core/utils/exception_mapper.dart';
 import 'package:korean_language_app/features/test_results/data/datasources/test_results_remote_datasources.dart';
-import 'package:korean_language_app/features/test_results/data/models/test_result.dart';
+import 'package:korean_language_app/core/models/test_result.dart';
 
 class FirestoreTestResultsDataSourceImpl implements TestResultsRemoteDataSource {
   final FirebaseFirestore firestore;

@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:korean_language_app/features/tests/data/models/test_item.dart';
+import 'package:korean_language_app/core/models/test_item.dart';
 
 abstract class TestUploadRemoteDataSource {
   /// Upload test with image atomically - test is only created if all uploads succeed

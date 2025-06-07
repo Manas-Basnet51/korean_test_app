@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:developer' as dev;
 import 'package:korean_language_app/core/services/storage_service.dart';
 import 'package:korean_language_app/features/tests/data/datasources/tests_local_datasource.dart';
-import 'package:korean_language_app/features/tests/data/models/test_item.dart';
+import 'package:korean_language_app/core/models/test_item.dart';
 
 class TestsLocalDataSourceImpl implements TestsLocalDataSource {
   final StorageService _storageService;

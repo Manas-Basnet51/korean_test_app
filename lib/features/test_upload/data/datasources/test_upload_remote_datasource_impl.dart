@@ -4,7 +4,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:korean_language_app/core/utils/exception_mapper.dart';
 import 'package:korean_language_app/features/test_upload/data/datasources/test_upload_remote_datasource.dart';
-import 'package:korean_language_app/features/tests/data/models/test_item.dart';
+import 'package:korean_language_app/core/models/test_item.dart';
 
 class FirestoreTestUploadDataSourceImpl implements TestUploadRemoteDataSource {
   final FirebaseFirestore firestore;

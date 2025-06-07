@@ -10,7 +10,7 @@ import 'package:korean_language_app/core/presentation/snackbar/bloc/snackbar_cub
 import 'package:korean_language_app/core/presentation/widgets/errors/error_widget.dart';
 import 'package:korean_language_app/core/routes/app_router.dart';
 import 'package:korean_language_app/features/test_upload/presentation/bloc/test_upload_cubit.dart';
-import 'package:korean_language_app/features/tests/data/models/test_item.dart';
+import 'package:korean_language_app/core/models/test_item.dart';
 import 'package:korean_language_app/features/tests/presentation/bloc/tests_cubit.dart';
 import 'package:korean_language_app/features/tests/presentation/widgets/test_card.dart';
 import 'package:korean_language_app/features/tests/presentation/widgets/test_grid_skeleton.dart';

@@ -5,7 +5,7 @@ import 'package:korean_language_app/core/network/network_info.dart';
 import 'package:korean_language_app/core/utils/exception_mapper.dart';
 import 'package:korean_language_app/features/test_results/data/datasources/test_results_local_datasources.dart';
 import 'package:korean_language_app/features/test_results/data/datasources/test_results_remote_datasources.dart';
-import 'package:korean_language_app/features/test_results/data/models/test_result.dart';
+import 'package:korean_language_app/core/models/test_result.dart';
 import 'package:korean_language_app/features/test_results/domain/repositories/test_results_repository.dart';
 
 class TestResultsRepositoryImpl extends BaseRepository implements TestResultsRepository {

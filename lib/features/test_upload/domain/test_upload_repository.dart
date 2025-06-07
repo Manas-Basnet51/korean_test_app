@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:korean_language_app/core/errors/api_result.dart';
-import 'package:korean_language_app/features/tests/data/models/test_item.dart';
+import 'package:korean_language_app/core/models/test_item.dart';
 
 abstract class TestUploadRepository {
   /// Create test with optional image - atomic operation

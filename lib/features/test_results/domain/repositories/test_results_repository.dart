@@ -1,5 +1,5 @@
 import 'package:korean_language_app/core/errors/api_result.dart';
-import 'package:korean_language_app/features/test_results/data/models/test_result.dart';
+import 'package:korean_language_app/core/models/test_result.dart';
 
 abstract class TestResultsRepository {
   // Save test results

@@ -9,8 +9,8 @@ import 'package:korean_language_app/core/presentation/language_preference/bloc/l
 import 'package:korean_language_app/core/presentation/snackbar/bloc/snackbar_cubit.dart';
 import 'package:korean_language_app/features/auth/presentation/bloc/auth_cubit.dart';
 import 'package:korean_language_app/features/test_upload/presentation/bloc/test_upload_cubit.dart';
-import 'package:korean_language_app/features/tests/data/models/test_item.dart';
-import 'package:korean_language_app/features/tests/data/models/test_question.dart';
+import 'package:korean_language_app/core/models/test_item.dart';
+import 'package:korean_language_app/core/models/test_question.dart';
 
 class TestUploadPage extends StatefulWidget {
   const TestUploadPage({super.key});

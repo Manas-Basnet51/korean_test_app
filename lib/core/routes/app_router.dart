@@ -16,7 +16,7 @@ import 'package:korean_language_app/features/book_upload/presentation/pages/uplo
 import 'package:korean_language_app/features/home/presentation/pages/home_page.dart';
 import 'package:korean_language_app/features/profile/presentation/pages/language_preference_page.dart';
 import 'package:korean_language_app/features/profile/presentation/pages/profile_page.dart';
-import 'package:korean_language_app/features/test_results/data/models/test_result.dart';
+import 'package:korean_language_app/core/models/test_result.dart';
 import 'package:korean_language_app/features/test_upload/presentation/pages/test_edit_page.dart';
 import 'package:korean_language_app/features/test_results/presentation/pages/test_result_page.dart';
 import 'package:korean_language_app/features/test_results/presentation/pages/test_results_history_page.dart';

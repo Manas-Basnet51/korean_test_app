@@ -1,5 +1,5 @@
 import 'package:korean_language_app/core/enums/test_category.dart';
-import 'package:korean_language_app/features/tests/data/models/test_item.dart';
+import 'package:korean_language_app/core/models/test_item.dart';
 
 abstract class TestsRemoteDataSource {
   Future<List<TestItem>> getTests({int page = 0, int pageSize = 5});

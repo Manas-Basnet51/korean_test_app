@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:korean_language_app/core/presentation/language_preference/bloc/language_preference_cubit.dart';
 import 'package:korean_language_app/core/presentation/snackbar/bloc/snackbar_cubit.dart';
 import 'package:korean_language_app/core/routes/app_router.dart';
-import 'package:korean_language_app/features/tests/data/models/test_question.dart';
+import 'package:korean_language_app/core/models/test_question.dart';
 import 'package:korean_language_app/features/tests/presentation/bloc/test_session/test_session_cubit.dart';
 import 'package:korean_language_app/features/tests/presentation/bloc/tests_cubit.dart';
 

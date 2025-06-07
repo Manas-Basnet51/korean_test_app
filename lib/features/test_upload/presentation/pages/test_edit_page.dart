@@ -8,8 +8,8 @@ import 'package:korean_language_app/core/enums/test_category.dart';
 import 'package:korean_language_app/core/presentation/language_preference/bloc/language_preference_cubit.dart';
 import 'package:korean_language_app/core/presentation/snackbar/bloc/snackbar_cubit.dart';
 import 'package:korean_language_app/features/test_upload/presentation/bloc/test_upload_cubit.dart';
-import 'package:korean_language_app/features/tests/data/models/test_item.dart';
-import 'package:korean_language_app/features/tests/data/models/test_question.dart';
+import 'package:korean_language_app/core/models/test_item.dart';
+import 'package:korean_language_app/core/models/test_question.dart';
 import 'package:korean_language_app/features/tests/presentation/bloc/tests_cubit.dart';
 
 class TestEditPage extends StatefulWidget {

@@ -5,7 +5,7 @@ import 'package:korean_language_app/core/network/network_info.dart';
 import 'package:korean_language_app/features/admin/data/service/admin_permission.dart';
 import 'package:korean_language_app/features/test_upload/data/datasources/test_upload_remote_datasource.dart';
 import 'package:korean_language_app/features/test_upload/domain/test_upload_repository.dart';
-import 'package:korean_language_app/features/tests/data/models/test_item.dart';
+import 'package:korean_language_app/core/models/test_item.dart';
 
 class TestUploadRepositoryImpl extends BaseRepository implements TestUploadRepository {
   final TestUploadRemoteDataSource remoteDataSource;

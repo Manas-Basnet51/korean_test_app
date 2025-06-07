@@ -4,7 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:korean_language_app/core/presentation/language_preference/bloc/language_preference_cubit.dart';
 import 'package:korean_language_app/core/routes/app_router.dart';
 import 'package:korean_language_app/features/auth/presentation/bloc/auth_cubit.dart';
-import 'package:korean_language_app/features/test_results/data/models/test_result.dart';
+import 'package:korean_language_app/core/models/test_result.dart';
 import 'package:korean_language_app/features/test_results/presentation/bloc/test_results_cubit.dart';
 
 class TestResultsHistoryPage extends StatefulWidget {
