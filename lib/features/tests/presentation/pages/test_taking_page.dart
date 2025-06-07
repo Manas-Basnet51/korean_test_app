@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:korean_language_app/core/enums/question_type.dart';
 import 'package:korean_language_app/core/presentation/language_preference/bloc/language_preference_cubit.dart';
 import 'package:korean_language_app/core/presentation/snackbar/bloc/snackbar_cubit.dart';
 import 'package:korean_language_app/core/routes/app_router.dart';
@@ -19,29 +20,65 @@ class TestTakingPage extends StatefulWidget {
   State<TestTakingPage> createState() => _TestTakingPageState();
 }
 
-class _TestTakingPageState extends State<TestTakingPage> {
+class _TestTakingPageState extends State<TestTakingPage>
+    with TickerProviderStateMixin {
   int? _selectedAnswerIndex;
   bool _showingExplanation = false;
-  
+  late AnimationController _progressAnimationController;
+  late AnimationController _slideAnimationController;
+  late Animation<double> _slideAnimation;
+  Timer? _autoAdvanceTimer;
+
   TestSessionCubit get _sessionCubit => context.read<TestSessionCubit>();
   TestsCubit get _testsCubit => context.read<TestsCubit>();
-  LanguagePreferenceCubit get _languageCubit => context.read<LanguagePreferenceCubit>();
+  LanguagePreferenceCubit get _languageCubit =>
+      context.read<LanguagePreferenceCubit>();
   SnackBarCubit get _snackBarCubit => context.read<SnackBarCubit>();
 
   @override
   void initState() {
     super.initState();
+    _initializeAnimations();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadAndStartTest();
     });
   }
 
+  void _initializeAnimations() {
+    _progressAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+    
+    _slideAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    
+    _slideAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _slideAnimationController,
+      curve: Curves.easeInOut,
+    ));
+  }
+
+  @override
+  void dispose() {
+    _progressAnimationController.dispose();
+    _slideAnimationController.dispose();
+    _autoAdvanceTimer?.cancel();
+    super.dispose();
+  }
+
   Future<void> _loadAndStartTest() async {
     await _testsCubit.loadTestById(widget.testId);
-    
+
     final testsState = _testsCubit.state;
     if (testsState.selectedTest != null) {
       _sessionCubit.startTest(testsState.selectedTest!);
+      _slideAnimationController.forward();
     } else {
       _snackBarCubit.showErrorLocalized(
         korean: '시험을 찾을 수 없습니다',
@@ -56,7 +93,6 @@ class _TestTakingPageState extends State<TestTakingPage> {
     return BlocConsumer<TestSessionCubit, TestSessionState>(
       listener: (context, state) {
         if (state is TestSessionCompleted) {
-          // Fix: Use GoRouter navigation instead of Navigator.pushReplacement
           context.push(Routes.testResult, extra: state.result);
         } else if (state is TestSessionError) {
           _snackBarCubit.showErrorLocalized(
@@ -66,124 +102,69 @@ class _TestTakingPageState extends State<TestTakingPage> {
         }
       },
       builder: (context, state) {
-        if (state is TestSessionInProgress) {
-          return _buildTestInProgress(state.session);
-        } else if (state is TestSessionPaused) {
-          return _buildTestPaused(state.session);
-        } else if (state is TestSessionSubmitting) {
-          return _buildSubmittingTest();
-        } else {
-          return _buildLoadingTest();
+        if (state is TestSessionInitial) {
+          return _buildLoadingScreen();
         }
+
+        if (state is TestSessionInProgress || state is TestSessionPaused) {
+          final session = state is TestSessionInProgress
+              ? state.session
+              : (state as TestSessionPaused).session;
+          return _buildTestScreen(session, state is TestSessionPaused);
+        }
+
+        if (state is TestSessionSubmitting) {
+          return _buildSubmittingScreen();
+        }
+
+        return _buildErrorScreen();
       },
     );
   }
 
-  Widget _buildLoadingTest() {
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 16),
-            Text(
-              _languageCubit.getLocalizedText(
-                korean: '시험을 불러오는 중...',
-                english: 'Loading test...',
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSubmittingTest() {
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 16),
-            Text(
-              _languageCubit.getLocalizedText(
-                korean: '답안을 제출하는 중...',
-                english: 'Submitting answers...',
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTestPaused(TestSession session) {
+  Widget _buildLoadingScreen() {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-
+    
     return Scaffold(
-      appBar: AppBar(
-        title: Text(session.test.title),
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => _showExitConfirmation(),
-        ),
-      ),
+      backgroundColor: colorScheme.background,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.pause_circle_outline,
-              size: 80,
-              color: colorScheme.primary,
-            ),
-            const SizedBox(height: 24),
-            Text(
-              _languageCubit.getLocalizedText(
-                korean: '시험이 일시정지되었습니다',
-                english: 'Test Paused',
+            Container(
+              padding: const EdgeInsets.all(32),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: colorScheme.shadow.withOpacity(0.1),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
               ),
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _languageCubit.getLocalizedText(
-                korean: '계속하려면 재개 버튼을 누르세요',
-                english: 'Tap resume to continue the test',
-              ),
-              style: theme.textTheme.bodyLarge,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 32),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                OutlinedButton(
-                  onPressed: () => _showExitConfirmation(),
-                  child: Text(
+              child: Column(
+                children: [
+                  CircularProgressIndicator(
+                    strokeWidth: 3,
+                    color: colorScheme.primary,
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
                     _languageCubit.getLocalizedText(
-                      korean: '시험 종료',
-                      english: 'Exit Test',
+                      korean: '시험을 준비하고 있습니다...',
+                      english: 'Preparing your test...',
+                    ),
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: colorScheme.onSurface,
                     ),
                   ),
-                ),
-                const SizedBox(width: 16),
-                ElevatedButton.icon(
-                  onPressed: () => _sessionCubit.resumeTest(),
-                  icon: const Icon(Icons.play_arrow),
-                  label: Text(
-                    _languageCubit.getLocalizedText(
-                      korean: '재개',
-                      english: 'Resume',
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),
@@ -191,234 +172,317 @@ class _TestTakingPageState extends State<TestTakingPage> {
     );
   }
 
-  Widget _buildTestInProgress(TestSession session) {
-    final currentQuestion = session.test.questions[session.currentQuestionIndex];
-
-    return Scaffold(
-      appBar: _buildTestAppBar(session),
-      body: Column(
-        children: [
-          _buildTestProgress(session),
-          if (session.hasTimeLimit) _buildTimeRemaining(session),
-          Expanded(
-            child: _buildQuestionContent(session, currentQuestion),
-          ),
-          _buildTestNavigation(session),
-        ],
-      ),
-    );
-  }
-
-  PreferredSizeWidget _buildTestAppBar(TestSession session) {
-    return AppBar(
-      title: Text(session.test.title),
-      leading: IconButton(
-        icon: const Icon(Icons.pause),
-        onPressed: () => _sessionCubit.pauseTest(),
-      ),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => _showExitConfirmation(),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildTestProgress(TestSession session) {
+  Widget _buildSubmittingScreen() {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Scaffold(
+      backgroundColor: colorScheme.background,
+      body: Center(
+        child: Container(
+          padding: const EdgeInsets.all(32),
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: colorScheme.shadow.withOpacity(0.1),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                '${_languageCubit.getLocalizedText(korean: '문제', english: 'Question')} ${session.currentQuestionIndex + 1}/${session.totalQuestions}',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: colorScheme.primary.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.upload,
+                  size: 48,
+                  color: colorScheme.primary,
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(12),
+              const SizedBox(height: 24),
+              Text(
+                _languageCubit.getLocalizedText(
+                  korean: '답안을 제출하고 있습니다...',
+                  english: 'Submitting your answers...',
                 ),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: colorScheme.onSurface,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorScreen() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
+    return Scaffold(
+      backgroundColor: colorScheme.background,
+      body: Center(
+        child: Container(
+          margin: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(32),
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: colorScheme.shadow.withOpacity(0.1),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.error_outline,
+                size: 64,
+                color: colorScheme.error,
+              ),
+              const SizedBox(height: 24),
+              Text(
+                _languageCubit.getLocalizedText(
+                  korean: '오류가 발생했습니다',
+                  english: 'Something went wrong',
+                ),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => context.pop(),
                 child: Text(
-                  '${_languageCubit.getLocalizedText(korean: '답변 완료', english: 'Answered')}: ${session.answeredQuestionsCount}/${session.totalQuestions}',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: theme.colorScheme.onSecondaryContainer,
+                  _languageCubit.getLocalizedText(
+                    korean: '돌아가기',
+                    english: 'Go Back',
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          
-          // Progress bar
-          LinearProgressIndicator(
-            value: session.progress,
-            backgroundColor: Colors.grey[300],
-            valueColor: AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
-          ),
-          
-          // Question indicators (show for reasonable number of questions)
-          if (session.totalQuestions <= 20) ...[
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              alignment: WrapAlignment.center,
-              children: List.generate(session.totalQuestions, (index) {
-                final isCurrentQuestion = index == session.currentQuestionIndex;
-                final isAnswered = session.isQuestionAnswered(index);
-                
-                return GestureDetector(
-                  onTap: () {
-                    // Allow jumping to any question
-                    setState(() {
-                      _selectedAnswerIndex = null;
-                      _showingExplanation = false;
-                    });
-                    _sessionCubit.goToQuestion(index);
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: isCurrentQuestion 
-                          ? theme.colorScheme.primary
-                          : isAnswered 
-                              ? theme.colorScheme.secondary
-                              : Colors.grey[300],
-                      borderRadius: BorderRadius.circular(18),
-                      border: isCurrentQuestion 
-                          ? Border.all(color: theme.colorScheme.primary, width: 3)
-                          : Border.all(color: Colors.transparent, width: 3),
-                      boxShadow: isCurrentQuestion ? [
-                        BoxShadow(
-                          color: theme.colorScheme.primary.withValues(alpha: 0.3),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
-                        ),
-                      ] : null,
-                    ),
-                    child: Center(
-                      child: isAnswered && !isCurrentQuestion
-                          ? const Icon(
-                              Icons.check,
-                              size: 18,
-                              color: Colors.white,
-                            )
-                          : Text(
-                              '${index + 1}',
-                              style: TextStyle(
-                                color: isCurrentQuestion || isAnswered 
-                                    ? Colors.white 
-                                    : Colors.black54,
-                                fontWeight: isCurrentQuestion 
-                                    ? FontWeight.bold 
-                                    : FontWeight.w600,
-                                fontSize: 14,
-                              ),
-                            ),
-                    ),
-                  ),
-                );
-              }),
-            ),
-            const SizedBox(height: 8),
-            
-            // Legend
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _buildLegendItem(
-                  color: theme.colorScheme.primary,
-                  label: _languageCubit.getLocalizedText(korean: '현재', english: 'Current'),
-                  icon: null,
-                ),
-                const SizedBox(width: 16),
-                _buildLegendItem(
-                  color: theme.colorScheme.secondary,
-                  label: _languageCubit.getLocalizedText(korean: '완료', english: 'Done'),
-                  icon: Icons.check,
-                ),
-                const SizedBox(width: 16),
-                _buildLegendItem(
-                  color: Colors.grey[300]!,
-                  label: _languageCubit.getLocalizedText(korean: '미완료', english: 'Todo'),
-                  icon: null,
-                ),
-              ],
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildLegendItem({
-    required Color color,
-    required String label,
-    IconData? icon,
-  }) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 16,
-          height: 16,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: icon != null 
-              ? Icon(icon, size: 10, color: Colors.white)
-              : null,
+  Widget _buildTestScreen(TestSession session, bool isPaused) {
+    final question = session.test.questions[session.currentQuestionIndex];
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
+    return Scaffold(
+      backgroundColor: colorScheme.background,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildTestHeader(session, isPaused),
+            Expanded(
+              child: AnimatedBuilder(
+                animation: _slideAnimation,
+                builder: (context, child) {
+                  return Transform.translate(
+                    offset: Offset(0, 50 * (1 - _slideAnimation.value)),
+                    child: Opacity(
+                      opacity: _slideAnimation.value,
+                      child: _buildQuestionContent(session, question),
+                    ),
+                  );
+                },
+              ),
+            ),
+            _buildTestNavigation(session),
+          ],
         ),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.grey[600],
-          ),
-        ),
-      ],
+      ),
     );
   }
 
-  Widget _buildTimeRemaining(TestSession session) {
+  Widget _buildTestHeader(TestSession session, bool isPaused) {
     final theme = Theme.of(context);
-    final isLowTime = session.timeRemaining != null && session.timeRemaining! < 300; // 5 minutes
+    final colorScheme = theme.colorScheme;
     
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: isLowTime ? Colors.red.withValues(alpha: 0.1) : null,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.shadow.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              IconButton(
+                onPressed: () => _showExitConfirmation(),
+                icon: const Icon(Icons.close),
+                style: IconButton.styleFrom(
+                  backgroundColor: colorScheme.surfaceVariant,
+                  foregroundColor: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      session.test.title,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: colorScheme.onSurface,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _languageCubit.getLocalizedText(
+                        korean: '${session.currentQuestionIndex + 1}/${session.totalQuestions} 문제',
+                        english: 'Question ${session.currentQuestionIndex + 1} of ${session.totalQuestions}',
+                      ),
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (session.hasTimeLimit)
+                _buildTimeDisplay(session, isPaused),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _buildProgressBar(session),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimeDisplay(TestSession session, bool isPaused) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isLowTime = session.timeRemaining != null && session.timeRemaining! < 300;
+    
+    Color backgroundColor;
+    Color borderColor;
+    Color iconColor;
+    Color textColor;
+    
+    if (isPaused) {
+      backgroundColor = colorScheme.tertiary.withOpacity(0.1);
+      borderColor = colorScheme.tertiary;
+      iconColor = colorScheme.tertiary;
+      textColor = colorScheme.tertiary;
+    } else if (isLowTime) {
+      backgroundColor = colorScheme.error.withOpacity(0.1);
+      borderColor = colorScheme.error;
+      iconColor = colorScheme.error;
+      textColor = colorScheme.error;
+    } else {
+      backgroundColor = colorScheme.primary.withOpacity(0.1);
+      borderColor = colorScheme.primary;
+      iconColor = colorScheme.primary;
+      textColor = colorScheme.primary;
+    }
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor, width: 1),
+      ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            Icons.timer,
-            size: 20,
-            color: isLowTime ? Colors.red : theme.colorScheme.primary,
+            isPaused ? Icons.pause : Icons.timer,
+            size: 16,
+            color: iconColor,
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           Text(
-            '${_languageCubit.getLocalizedText(korean: '남은 시간', english: 'Time remaining')}: ${session.formattedTimeRemaining}',
+            isPaused
+                ? _languageCubit.getLocalizedText(korean: '일시정지', english: 'Paused')
+                : session.formattedTimeRemaining,
             style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: isLowTime ? Colors.red : theme.colorScheme.primary,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: textColor,
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildProgressBar(TestSession session) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              _languageCubit.getLocalizedText(korean: '진행률', english: 'Progress'),
+              style: TextStyle(
+                fontSize: 12,
+                color: colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            Text(
+              '${(session.progress * 100).round()}%',
+              style: TextStyle(
+                fontSize: 12,
+                color: colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        AnimatedBuilder(
+          animation: _progressAnimationController,
+          builder: (context, child) {
+            return LinearProgressIndicator(
+              value: session.progress * _progressAnimationController.value,
+              backgroundColor: colorScheme.surfaceVariant,
+              valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary),
+              minHeight: 6,
+            );
+          },
+        ),
+      ],
     );
   }
 
@@ -426,260 +490,361 @@ class _TestTakingPageState extends State<TestTakingPage> {
     final savedAnswer = session.getAnswerForQuestion(session.currentQuestionIndex);
     
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Question image if available
-          if (question.questionImageUrl != null && question.questionImageUrl!.isNotEmpty)
-            Container(
-              margin: const EdgeInsets.only(bottom: 16),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: CachedNetworkImage(
-                  imageUrl: question.questionImageUrl!,
-                  fit: BoxFit.cover,
-                  placeholder: (context, url) => Container(
-                    height: 200,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[300],
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Center(child: CircularProgressIndicator()),
-                  ),
-                  errorWidget: (context, url, error) => Container(
-                    height: 200,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[300],
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Center(child: Icon(Icons.broken_image)),
-                  ),
-                ),
-              ),
-            ),
-          
-          // Question text
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
-              ),
-            ),
-            child: Text(
-              question.question,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-                height: 1.4,
-              ),
-            ),
-          ),
-          
+          _buildQuestionCard(question),
           const SizedBox(height: 24),
-          
-          // Answer options
-          ...question.options.asMap().entries.map((entry) {
-            final index = entry.key;
-            final option = entry.value;
-            
-            // Clear logic for different states
-            final isCurrentlySelected = _selectedAnswerIndex == index;
-            final isPreviouslyAnswered = savedAnswer != null && savedAnswer.selectedAnswerIndex == index;
-            final isCorrectAnswer = index == question.correctAnswerIndex;
-            
-            Color? backgroundColor;
-            Color? borderColor;
-            Color? textColor;
-            IconData? trailingIcon;
-            Color? trailingIconColor;
-            
-            // Priority: Explanation mode > Previously answered > Currently selecting
-            if (_showingExplanation && savedAnswer != null) {
-              // Show explanation colors
-              if (index == savedAnswer.selectedAnswerIndex) {
-                backgroundColor = savedAnswer.isCorrect 
-                    ? Colors.green.withValues(alpha: 0.1) 
-                    : Colors.red.withValues(alpha: 0.1);
-                borderColor = savedAnswer.isCorrect ? Colors.green : Colors.red;
-                textColor = savedAnswer.isCorrect ? Colors.green[800] : Colors.red[800];
-                trailingIcon = savedAnswer.isCorrect ? Icons.check_circle : Icons.cancel;
-                trailingIconColor = savedAnswer.isCorrect ? Colors.green[600] : Colors.red[600];
-              } else if (isCorrectAnswer) {
-                backgroundColor = Colors.green.withValues(alpha: 0.1);
-                borderColor = Colors.green;
-                textColor = Colors.green[800];
-                trailingIcon = Icons.check_circle;
-                trailingIconColor = Colors.green[600];
-              }
-            } else if (isPreviouslyAnswered) {
-              // Show previously answered state
-              backgroundColor = Theme.of(context).colorScheme.secondary.withValues(alpha: 0.1);
-              borderColor = Theme.of(context).colorScheme.secondary;
-              textColor = Theme.of(context).colorScheme.secondary;
-              trailingIcon = Icons.done;
-              trailingIconColor = Theme.of(context).colorScheme.secondary;
-            } else if (isCurrentlySelected) {
-              // Show current selection
-              backgroundColor = Theme.of(context).colorScheme.primary.withValues(alpha: 0.1);
-              borderColor = Theme.of(context).colorScheme.primary;
-              textColor = Theme.of(context).colorScheme.primary;
-            }
-            
-            // Determine if this option should show as "selected" (checked circle)
-            final showAsSelected = isCurrentlySelected || (isPreviouslyAnswered && !_showingExplanation);
-            
-            return Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              child: Material(
-                borderRadius: BorderRadius.circular(12),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: _showingExplanation ? null : () {
-                    setState(() {
-                      _selectedAnswerIndex = index;
-                      _showingExplanation = false;
-                    });
-                  },
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: backgroundColor,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: borderColor ?? Colors.grey.withValues(alpha: 0.3),
-                        width: borderColor != null ? 2 : 1,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 24,
-                          height: 24,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: textColor ?? Colors.grey,
-                              width: 2,
-                            ),
-                            color: showAsSelected
-                                ? (textColor ?? Theme.of(context).colorScheme.primary)
-                                : Colors.transparent,
-                          ),
-                          child: showAsSelected
-                              ? const Icon(Icons.check, size: 16, color: Colors.white)
-                              : null,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            '${String.fromCharCode(65 + index)}. $option',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: showAsSelected ? FontWeight.w600 : FontWeight.normal,
-                              color: textColor,
-                            ),
-                          ),
-                        ),
-                        if (trailingIcon != null)
-                          Icon(trailingIcon, color: trailingIconColor, size: 20),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }),
-          
-          // Answer button - show if we have a current selection and not showing explanation
+          _buildAnswerOptionsGrid(question, savedAnswer),
+          const SizedBox(height: 24),
           if (_selectedAnswerIndex != null && !_showingExplanation)
-            Container(
-              margin: const EdgeInsets.only(top: 16),
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => _answerQuestion(),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-                child: Text(
-                  savedAnswer != null 
-                      ? _languageCubit.getLocalizedText(korean: '답안 변경', english: 'Change Answer')
-                      : _languageCubit.getLocalizedText(korean: '답안 선택', english: 'Select Answer'),
-                ),
-              ),
-            ),
-          
-          // Show explanation button if answered but not showing explanation
-          if (savedAnswer != null && !_showingExplanation && question.explanation != null)
-            Container(
-              margin: const EdgeInsets.only(top: 8),
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  setState(() {
-                    _showingExplanation = true;
-                    _selectedAnswerIndex = null;
-                  });
-                },
-                icon: const Icon(Icons.lightbulb_outline),
-                label: Text(
-                  _languageCubit.getLocalizedText(korean: '설명 보기', english: 'Show Explanation'),
-                ),
-              ),
-            ),
-          
-          // Explanation
+            _buildSubmitButton(savedAnswer),
           if (_showingExplanation && question.explanation != null)
-            Container(
-              margin: const EdgeInsets.only(top: 24),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.blue.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.lightbulb_outline, color: Colors.blue[700]),
-                      const SizedBox(width: 8),
-                      Text(
-                        _languageCubit.getLocalizedText(
-                          korean: '설명',
-                          english: 'Explanation',
-                        ),
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue[700],
-                        ),
-                      ),
-                    ],
+            _buildExplanationCard(question.explanation!),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuestionCard(TestQuestion question) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.shadow.withOpacity(0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (question.questionImageUrl != null && question.questionImageUrl!.isNotEmpty)
+            _buildQuestionImage(question.questionImageUrl!),
+          
+          Padding(
+            padding: EdgeInsets.all(question.questionImageUrl != null ? 20 : 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                  const SizedBox(height: 8),
+                  child: Text(
+                    _languageCubit.getLocalizedText(korean: '문제', english: 'Question'),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: colorScheme.primary,
+                    ),
+                  ),
+                ),
+                if (question.question.isNotEmpty) ...[
+                  const SizedBox(height: 16),
                   Text(
-                    question.explanation!,
-                    style: const TextStyle(height: 1.4),
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton(
-                    onPressed: () {
-                      setState(() {
-                        _showingExplanation = false;
-                      });
-                    },
-                    child: Text(
-                      _languageCubit.getLocalizedText(korean: '설명 닫기', english: 'Close Explanation'),
+                    question.question,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      height: 1.5,
+                      color: colorScheme.onSurface,
                     ),
                   ),
                 ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuestionImage(String imageUrl) {
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      child: Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(maxHeight: 300),
+        child: CachedNetworkImage(
+          imageUrl: imageUrl,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => _buildImagePlaceholder(300),
+          errorWidget: (context, url, error) => _buildImageError('question', 300),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAnswerOptionsGrid(TestQuestion question, savedAnswer) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          child: Text(
+            _languageCubit.getLocalizedText(korean: '답안을 선택하세요', english: 'Choose your answer'),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: colorScheme.onSurface,
+            ),
+          ),
+        ),
+        ...question.options.asMap().entries.map((entry) {
+          final index = entry.key;
+          final option = entry.value;
+          return _buildAnswerOption(index, option, question, savedAnswer);
+        }).toList(),
+      ],
+    );
+  }
+
+  Widget _buildAnswerOption(int index, AnswerOption option, TestQuestion question, savedAnswer) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isSelected = _selectedAnswerIndex == index;
+    final isCorrectAnswer = index == question.correctAnswerIndex;
+    final wasSelectedAnswer = savedAnswer?.selectedAnswerIndex == index;
+    final showResult = _showingExplanation && savedAnswer != null;
+    
+    Color borderColor = colorScheme.outline;
+    Color backgroundColor = colorScheme.surface;
+    Color textColor = colorScheme.onSurface;
+    Widget? statusIcon;
+    
+    if (showResult) {
+      if (isCorrectAnswer) {
+        borderColor = colorScheme.primary;
+        backgroundColor = colorScheme.primary.withOpacity(0.1);
+        textColor = colorScheme.primary;
+        statusIcon = Icon(Icons.check_circle, color: colorScheme.primary, size: 24);
+      } else if (wasSelectedAnswer) {
+        borderColor = colorScheme.error;
+        backgroundColor = colorScheme.error.withOpacity(0.1);
+        textColor = colorScheme.error;
+        statusIcon = Icon(Icons.cancel, color: colorScheme.error, size: 24);
+      }
+    } else if (isSelected) {
+      borderColor = colorScheme.primary;
+      backgroundColor = colorScheme.primary.withOpacity(0.1);
+      textColor = colorScheme.primary;
+    }
+    
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: _showingExplanation ? null : () {
+            setState(() {
+              _selectedAnswerIndex = index;
+            });
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: borderColor, width: 2),
+              color: backgroundColor,
+              boxShadow: isSelected || showResult ? [
+                BoxShadow(
+                  color: borderColor.withOpacity(0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ] : null,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildOptionSelector(index, isSelected || wasSelectedAnswer, borderColor),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildOptionContent(index, option, textColor),
+                ),
+                if (statusIcon != null) ...[
+                  const SizedBox(width: 12),
+                  statusIcon,
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOptionSelector(int index, bool isSelected, Color color) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: color, width: 2),
+        color: isSelected ? color : Colors.transparent,
+      ),
+      child: Center(
+        child: isSelected
+            ? Icon(Icons.check, color: colorScheme.onPrimary, size: 18)
+            : Text(
+                String.fromCharCode(65 + index),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                  fontSize: 14,
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildOptionContent(int index, AnswerOption option, Color textColor) {
+    if (option.isImage && option.imageUrl != null && option.imageUrl!.isNotEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            constraints: const BoxConstraints(maxHeight: 200),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: CachedNetworkImage(
+                imageUrl: option.imageUrl!,
+                fit: BoxFit.cover,
+                width: double.infinity,
+                placeholder: (context, url) => _buildImagePlaceholder(200),
+                errorWidget: (context, url, error) => _buildImageError('answer', 200),
               ),
             ),
+          ),
+          if (option.text.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              option.text,
+              style: TextStyle(
+                fontSize: 14,
+                color: textColor,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ],
+      );
+    } else {
+      return Text(
+        option.text,
+        style: TextStyle(
+          fontSize: 16,
+          color: textColor,
+          height: 1.4,
+          fontWeight: FontWeight.w500,
+        ),
+      );
+    }
+  }
+
+  Widget _buildSubmitButton(savedAnswer) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
+    return Container(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: _answerQuestion,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: colorScheme.primary,
+          foregroundColor: colorScheme.onPrimary,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          elevation: 4,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(savedAnswer != null ? Icons.edit : Icons.send),
+            const SizedBox(width: 8),
+            Text(
+              savedAnswer != null 
+                  ? _languageCubit.getLocalizedText(korean: '답변 변경', english: 'Change Answer')
+                  : _languageCubit.getLocalizedText(korean: '답변 제출', english: 'Submit Answer'),
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExplanationCard(String explanation) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: colorScheme.secondary.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.secondary.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: colorScheme.secondary,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.lightbulb, color: colorScheme.onSecondary, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                _languageCubit.getLocalizedText(korean: '해설', english: 'Explanation'),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: colorScheme.secondary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            explanation,
+            style: TextStyle(
+              fontSize: 15,
+              height: 1.6,
+              color: colorScheme.onSurface,
+            ),
+          ),
         ],
       ),
     );
@@ -687,73 +852,126 @@ class _TestTakingPageState extends State<TestTakingPage> {
 
   Widget _buildTestNavigation(TestSession session) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final isFirstQuestion = session.currentQuestionIndex == 0;
     final isLastQuestion = session.currentQuestionIndex == session.totalQuestions - 1;
-    final allQuestionsAnswered = session.answeredQuestionsCount == session.totalQuestions;
     
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 4,
+            color: colorScheme.shadow.withOpacity(0.05),
+            blurRadius: 10,
             offset: const Offset(0, -2),
           ),
         ],
       ),
       child: Row(
         children: [
-          // Previous button
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: isFirstQuestion ? null : () {
-                setState(() {
-                  _selectedAnswerIndex = null;
-                  _showingExplanation = false;
-                });
-                _sessionCubit.previousQuestion();
-              },
-              icon: const Icon(Icons.arrow_back),
-              label: Text(
-                _languageCubit.getLocalizedText(
-                  korean: '이전',
-                  english: 'Previous',
+          if (!isFirstQuestion)
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => _previousQuestion(),
+                icon: const Icon(Icons.arrow_back),
+                label: Text(_languageCubit.getLocalizedText(korean: '이전', english: 'Previous')),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
             ),
-          ),
           
-          const SizedBox(width: 16),
+          if (!isFirstQuestion) const SizedBox(width: 16),
           
-          // Next/Finish button
           Expanded(
-            flex: 2,
+            flex: isFirstQuestion ? 1 : 2,
             child: ElevatedButton.icon(
-              onPressed: () {
-                if (isLastQuestion) {
-                  _showFinishConfirmation(session);
-                } else {
-                  setState(() {
-                    _selectedAnswerIndex = null;
-                    _showingExplanation = false;
-                  });
-                  _sessionCubit.nextQuestion();
-                }
-              },
-              icon: Icon(isLastQuestion ? Icons.check : Icons.arrow_forward),
+              onPressed: () => isLastQuestion ? _showFinishConfirmation(session) : _nextQuestion(),
+              icon: Icon(isLastQuestion ? Icons.flag : Icons.arrow_forward),
               label: Text(
                 isLastQuestion
                     ? _languageCubit.getLocalizedText(korean: '시험 완료', english: 'Finish Test')
                     : _languageCubit.getLocalizedText(korean: '다음', english: 'Next'),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: allQuestionsAnswered && isLastQuestion 
-                    ? Colors.green 
-                    : null,
+                backgroundColor: isLastQuestion ? colorScheme.tertiary : colorScheme.primary,
+                foregroundColor: isLastQuestion ? colorScheme.onTertiary : colorScheme.onPrimary,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 2,
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImagePlaceholder(double height) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(
+            strokeWidth: 2,
+            color: colorScheme.primary,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _languageCubit.getLocalizedText(
+              korean: '이미지 로딩 중...',
+              english: 'Loading image...',
+            ),
+            style: TextStyle(
+              color: colorScheme.onSurfaceVariant,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImageError(String type, double height) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colorScheme.outline),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.broken_image, size: 40, color: colorScheme.onErrorContainer),
+          const SizedBox(height: 8),
+          Text(
+            _languageCubit.getLocalizedText(
+              korean: '$type 이미지 로드 실패',
+              english: 'Failed to load $type image',
+            ),
+            style: TextStyle(
+              color: colorScheme.onErrorContainer,
+              fontSize: 12,
+            ),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
@@ -762,114 +980,63 @@ class _TestTakingPageState extends State<TestTakingPage> {
 
   void _answerQuestion() {
     if (_selectedAnswerIndex == null) return;
+    
     _sessionCubit.answerQuestion(_selectedAnswerIndex!);
+    
+    setState(() {
+      _showingExplanation = true;
+    });
   }
 
-  void _showExitConfirmation() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          _languageCubit.getLocalizedText(
-            korean: '시험 종료',
-            english: 'Exit Test',
-          ),
-        ),
-        content: Text(
-          _languageCubit.getLocalizedText(
-            korean: '정말로 시험을 종료하시겠습니까? 진행 상황이 저장되지 않습니다.',
-            english: 'Are you sure you want to exit the test? Your progress will not be saved.',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              _languageCubit.getLocalizedText(
-                korean: '취소',
-                english: 'Cancel',
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _sessionCubit.cancelTest();
-              context.go(Routes.tests);
-            },
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.error,
-            ),
-            child: Text(
-              _languageCubit.getLocalizedText(
-                korean: '종료',
-                english: 'Exit',
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+  void _nextQuestion() {
+    setState(() {
+      _selectedAnswerIndex = null;
+      _showingExplanation = false;
+    });
+    
+    _slideAnimationController.reset();
+    _sessionCubit.nextQuestion();
+    _slideAnimationController.forward();
+    _progressAnimationController.forward();
+  }
+
+  void _previousQuestion() {
+    setState(() {
+      _selectedAnswerIndex = null;
+      _showingExplanation = false;
+    });
+    
+    _slideAnimationController.reset();
+    _sessionCubit.previousQuestion();
+    _slideAnimationController.forward();
   }
 
   void _showFinishConfirmation(TestSession session) {
-    final unansweredCount = session.totalQuestions - session.answeredQuestionsCount;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: colorScheme.surface,
         title: Text(
-          _languageCubit.getLocalizedText(
-            korean: '시험 완료',
-            english: 'Complete Test',
-          ),
+          _languageCubit.getLocalizedText(korean: '시험 완료', english: 'Finish Test'),
+          style: TextStyle(color: colorScheme.onSurface),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _languageCubit.getLocalizedText(
-                korean: '시험을 완료하시겠습니까? 답안을 제출한 후에는 수정할 수 없습니다.',
-                english: 'Are you ready to complete the test? You cannot change your answers after submission.',
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '${_languageCubit.getLocalizedText(korean: '답변 완료', english: 'Answered')}: ${session.answeredQuestionsCount}/${session.totalQuestions}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            if (unansweredCount > 0) ...[
-              const SizedBox(height: 8),
-              Text(
-                '${_languageCubit.getLocalizedText(korean: '미답변', english: 'Unanswered')}: $unansweredCount',
-                style: TextStyle(
-                  color: Colors.orange[800],
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _languageCubit.getLocalizedText(
-                  korean: '미답변 문제는 0점으로 처리됩니다.',
-                  english: 'Unanswered questions will be marked as incorrect.',
-                ),
-                style: TextStyle(
-                  color: Colors.red[600],
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ],
+        content: Text(
+          _languageCubit.getLocalizedText(
+            korean: '정말로 시험을 완료하시겠습니까?\n답변한 문제: ${session.answeredQuestionsCount}/${session.totalQuestions}',
+            english: 'Are you sure you want to finish the test?\nAnswered questions: ${session.answeredQuestionsCount}/${session.totalQuestions}',
+          ),
+          style: TextStyle(color: colorScheme.onSurface),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(
-              _languageCubit.getLocalizedText(
-                korean: '취소',
-                english: 'Cancel',
-              ),
+              _languageCubit.getLocalizedText(korean: '취소', english: 'Cancel'),
+              style: TextStyle(color: colorScheme.onSurface),
             ),
           ),
           ElevatedButton(
@@ -878,13 +1045,57 @@ class _TestTakingPageState extends State<TestTakingPage> {
               _sessionCubit.completeTest();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: unansweredCount > 0 ? Colors.orange : Colors.green,
+              backgroundColor: colorScheme.tertiary,
+              foregroundColor: colorScheme.onTertiary,
             ),
             child: Text(
-              _languageCubit.getLocalizedText(
-                korean: '완료',
-                english: 'Complete',
-              ),
+              _languageCubit.getLocalizedText(korean: '완료', english: 'Finish'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showExitConfirmation() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: colorScheme.surface,
+        title: Text(
+          _languageCubit.getLocalizedText(korean: '시험 종료', english: 'Exit Test'),
+          style: TextStyle(color: colorScheme.onSurface),
+        ),
+        content: Text(
+          _languageCubit.getLocalizedText(
+            korean: '시험을 종료하시겠습니까? 진행 상황이 저장되지 않습니다.',
+            english: 'Do you want to exit the test? Your progress will not be saved.',
+          ),
+          style: TextStyle(color: colorScheme.onSurface),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              _languageCubit.getLocalizedText(korean: '계속하기', english: 'Continue'),
+              style: TextStyle(color: colorScheme.onSurface),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              context.pop();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: colorScheme.error,
+              foregroundColor: colorScheme.onError,
+            ),
+            child: Text(
+              _languageCubit.getLocalizedText(korean: '종료', english: 'Exit'),
             ),
           ),
         ],
